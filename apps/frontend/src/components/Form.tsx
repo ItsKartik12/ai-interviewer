@@ -6,6 +6,7 @@ import axios from "axios";
 import { BACKEND_URL } from "@/lib/config";
 import { useNavigate } from "react-router";
 import { ArrowRight, Github, Loader2, Mic } from "lucide-react";
+import { AppHeader } from "./AppHeader";
 
 export function Form() {
     const [github, setGithub] = useState("");
@@ -31,7 +32,8 @@ export function Form() {
     }
 
     return (
-        <main className="flex h-screen w-screen items-center justify-center overflow-hidden px-6">
+        <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden px-6">
+            <AppHeader />
             <div className="flex w-full max-w-xl flex-col items-center text-center">
                 <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card/50 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
                     <Mic className="size-3.5 text-primary" />

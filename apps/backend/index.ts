@@ -1,15 +1,32 @@
+import "dotenv/config";
 import express from "express";
 import { PreInterviewBody } from "./types";
-import { scrapeGithub } from "./scrapers/github";
 import cors from "cors";
-import { prisma } from "./db";
-import { initSideband } from "./sideband";
 import { calculateResult } from "./result";
+import { getFrontendUrl, getPort, logServiceConfiguration } from "./config/env.ts";
+import { healthRouter } from "./routes/health.ts";
+import { authRateLimit, globalRateLimit } from "./middleware/rateLimit.ts";
+import { requireAuth, type AuthenticatedRequest } from "./middleware/auth.ts";
 
 const app = express();
 app.use(express.json());
-app.use(cors());
 app.use(express.text({ type: ["application/sdp", "text/plain"] }));
+app.use(
+  cors({
+    origin: getFrontendUrl(),
+    credentials: true,
+  }),
+);
+app.use(globalRateLimit);
+app.use(healthRouter);
+
+app.get("/api/v1/me", authRateLimit, requireAuth, (req: AuthenticatedRequest, res) => {
+  res.json({
+    uid: req.user?.uid,
+    email: req.user?.email ?? null,
+    name: req.user?.name ?? null,
+  });
+});
 
 app.post("/api/v1/pre-interview", async (req, res) => { 
     const { success, data } = PreInterviewBody.safeParse(req.body) ;
@@ -25,8 +42,10 @@ app.post("/api/v1/pre-interview", async (req, res) => {
     const githubUrl = data.github.endsWith("/") ? data.github.slice(0, -1) : data.github;
 
     const githubUsername = githubUrl.split("/").pop()!;
+    const { scrapeGithub } = await import("./scrapers/github.ts");
 
     const githubData = await scrapeGithub(githubUsername);
+    const { prisma } = await import("./db.ts");
 
     const interview = await prisma.interview.create({
         data: {
@@ -67,6 +86,7 @@ app.post("/api/v1/session/:interviewId", async (req, res) => {
       const sdp = await sdpResponse.text();
       res.send(sdp);
 
+      const { initSideband } = await import("./sideband.ts");
       initSideband(callId, req.params.interviewId);
     } catch (error) {
       console.error("Token generation error:", error);
@@ -77,6 +97,7 @@ app.post("/api/v1/session/:interviewId", async (req, res) => {
 
 app.post("/api/v1/session/user/response/:interviewId", async (req, res) => {
   const { message } = req.body;
+  const { prisma } = await import("./db.ts");
   await prisma.message.create({
     data: {
         interviewId: req.params.interviewId!,
@@ -89,6 +110,7 @@ app.post("/api/v1/session/user/response/:interviewId", async (req, res) => {
 })
 
 app.get("/api/v1/result/:interviewId", async (req, res) => {
+  const { prisma } = await import("./db.ts");
   const interview = await prisma.interview.findFirst({
     where: {
       id: req.params.interviewId
@@ -133,4 +155,8 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
   }
 })
 
-app.listen(3001);
+const port = getPort();
+logServiceConfiguration();
+app.listen(port, () => {
+  console.log(`Backend listening on http://localhost:${port}`);
+});

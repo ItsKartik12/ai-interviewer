@@ -23,3 +23,10 @@ export function getPort(): number {
   const port = Number(getEnv("PORT") ?? "3001");
   return Number.isFinite(port) ? port : 3001;
 }
+
+/** Logs which optional integrations are present. Does not print secret values. */
+export function logServiceConfiguration(): void {
+  console.log(
+    `[config] firebase=${isFirebaseConfigured() ? "configured" : "missing"} gemini=${isGeminiConfigured() ? "configured" : "missing"} port=${getPort()} frontend=${getFrontendUrl()}`,
+  );
+}
