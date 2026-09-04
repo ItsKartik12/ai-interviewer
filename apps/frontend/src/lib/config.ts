@@ -1,5 +1,9 @@
 function readPublicEnv(name: string): string | undefined {
-  const value = process.env[name];
+  const env =
+    typeof process !== "undefined"
+      ? process.env
+      : (typeof Bun !== "undefined" ? Bun.env : undefined);
+  const value = env?.[name] ?? env?.[name.replace(/^PUBLIC_/, "BUN_PUBLIC_")];
   return value && value.trim().length > 0 ? value.trim() : undefined;
 }
 

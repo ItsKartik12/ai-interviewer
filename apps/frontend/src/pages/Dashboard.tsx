@@ -77,9 +77,12 @@ export function Dashboard() {
         </section>
 
         <div className="mt-8 flex flex-wrap gap-2">
-          <Button asChild>
-            <Link to="/">Open interview start</Link>
-          </Button>
+          <Link
+            to="/"
+            className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Open interview start
+          </Link>
           <Button variant="outline" onClick={() => void logout()}>
             Log out
           </Button>

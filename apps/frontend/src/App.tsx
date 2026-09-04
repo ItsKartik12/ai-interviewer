@@ -1,4 +1,4 @@
-import "styles/globals.css";
+import "./index.css";
 import { Form } from "./components/Form";
 import { Interview } from "./components/Interview";
 import { Result } from "./components/Result";

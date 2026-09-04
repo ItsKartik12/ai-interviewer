@@ -13,21 +13,30 @@ export function AppHeader() {
       <nav className="flex items-center gap-2">
         {loading ? null : user ? (
           <>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/dashboard">Dashboard</Link>
-            </Button>
+            <Link
+              to="/dashboard"
+              className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              Dashboard
+            </Link>
             <Button variant="outline" size="sm" onClick={() => void logout()}>
               Log out
             </Button>
           </>
         ) : (
           <>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/login">Log in</Link>
-            </Button>
-            <Button size="sm" asChild>
-              <Link to="/register">Sign up</Link>
-            </Button>
+            <Link
+              to="/login"
+              className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              Log in
+            </Link>
+            <Link
+              to="/register"
+              className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Sign up
+            </Link>
           </>
         )}
       </nav>
