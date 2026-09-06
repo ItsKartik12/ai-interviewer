@@ -12,31 +12,124 @@ datasource db {
   provider = "postgresql"
 }
 
-model Interview {
+// User profile extended from Firebase
+model UserProfile {
   id                String     @id @default(uuid())
-  githubMetadata    Json
-  status            InterviewStatus
-  score             Int       @default(0)
-  conversations     Message[]
-  feedback          String?
+  uid               String     @unique // Firebase UID
+  email             String     @unique
+  name              String?
+  targetRole        String?
+  experienceLevel   String?    // beginner, intermediate, advanced
+  skills            String[]   @default([])
+  bio               String?
+  resumeUrl         String?    // S3/storage URL
+  resumeText        String?    // Extracted text
+  resumeStructured  Json?      // Parsed skills, experience, etc.
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  
+  interviews        Interview[]
 }
 
-model Message {
-  id              String     @id  @default(uuid())
-  message         String
-  type            MessageType
+// Interview session
+model Interview {
+  id                    String              @id @default(uuid())
+  userId                String
+  user                  UserProfile         @relation(fields: [userId], references: [uid], onDelete: Cascade)
+  
+  // Configuration
+  type                  InterviewType       // technical, behavioral, hr, mixed
+  role                  String              // Frontend Developer, Backend, etc.
+  difficulty            InterviewDifficulty // beginner, intermediate, advanced
+  duration              Int                 // minutes
+  jobDescription        String?
+  
+  // Metadata from legacy flow
+  githubMetadata        Json?               // Legacy GitHub data
+  
+  // Status lifecycle
+  status                InterviewStatus
+  startedAt             DateTime?
+  completedAt           DateTime?
+  
+  // Results
+  score                 Int?                // 0-100
+  feedback              String?             // AI-generated feedback
+  strengthsList         String[]            @default([])
+  weaknessesList        String[]            @default([])
+  recommendations       String[]            @default([])
+  
+  // Relations
+  conversations         Message[]
+  questionResponses     QuestionResponse[]
+  
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+}
+
+// Individual question in an interview
+model QuestionResponse {
+  id              String     @id @default(uuid())
   interviewId     String
-  interview       Interview   @relation(fields: [interviewId], references: [id])
-  createdAt       DateTime    @default(now())
+  interview       Interview  @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  
+  questionNumber  Int
+  question        String
+  candidateAnswer String
+  
+  // Evaluation metrics
+  score           Int?       // 0-10
+  technicalAccuracy Float?
+  relevance       Float?
+  clarity         Float?
+  depth           Float?
+  problemSolving  Float?
+  communication   Float?
+  confidence      Float?
+  
+  // Feedback
+  strengths       String[]   @default([])
+  weaknesses      String[]   @default([])
+  improvement     String?
+  followUpNeeded  Boolean    @default(false)
+  
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 }
 
-enum MessageType {
-  User
-  Assistant
+// Conversation messages (legacy compatibility + new)
+model Message {
+  id              String     @id @default(uuid())
+  interviewId     String
+  interview       Interview  @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  
+  type            MessageType
+  message         String
+  createdAt       DateTime   @default(now())
+}
+
+// Enums
+enum InterviewType {
+  Technical
+  Behavioral
+  HR
+  Mixed
+}
+
+enum InterviewDifficulty {
+  Beginner
+  Intermediate
+  Advanced
 }
 
 enum InterviewStatus {
   Pre
   InProgress
   Done
+  Abandoned
+}
+
+enum MessageType {
+  User
+  Assistant
 }
