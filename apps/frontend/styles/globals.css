@@ -167,11 +167,17 @@
 
 @layer utilities {
   /* Fast, subtle interaction defaults to replace flashy animations */
+
   .transition-ui {
-    @apply transition-all duration-200 ease-in-out;
+    transition: all 200ms ease-in-out;
   }
 
   .hover-elevate {
-    @apply transition-ui hover:-translate-y-[1px] hover:shadow-md;
+    transition: all 200ms ease-in-out;
+  }
+
+  .hover-elevate:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--tw-shadow, 0 4px 6px -1px rgb(0 0 0 / 0.1));
   }
 }
