@@ -71,9 +71,27 @@ app.post("/api/v1/pre-interview", async (req, res) => {
   const githubData = await scrapeGithub(githubUsername);
   const { prisma } = await import("./db.ts");
 
+  // Temporary local user for development
+  const user = await prisma.userProfile.upsert({
+    where: {
+      uid: "local-dev-user",
+    },
+    update: {},
+    create: {
+      uid: "local-dev-user",
+      email: "local-dev@example.com",
+      name: "Local Developer",
+    },
+  });
+
   const interview = await prisma.interview.create({
     data: {
-      githubMetadata: JSON.stringify(githubData),
+      userId: user.uid,
+      type: "Technical",
+      role: "Software Developer",
+      difficulty: "Intermediate",
+      duration: 30,
+      githubMetadata: githubData,
       status: "Pre",
     },
   });
