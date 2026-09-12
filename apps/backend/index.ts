@@ -13,6 +13,7 @@ import { authRateLimit, globalRateLimit } from "./middleware/rateLimit.ts";
 import { requireAuth, type AuthenticatedRequest } from "./middleware/auth.ts";
 
 const app = express();
+
 app.use(express.json());
 app.use(express.text({ type: ["application/sdp", "text/plain"] }));
 
@@ -21,6 +22,7 @@ app.use(
   cors({
     origin: (origin, callback) => {
       const frontendUrl = getFrontendUrl();
+
       if (
         !origin ||
         origin === frontendUrl ||
@@ -52,6 +54,10 @@ app.get(
   },
 );
 
+// --------------------------------------------------
+// PRE-INTERVIEW
+// --------------------------------------------------
+
 app.post("/api/v1/pre-interview", async (req, res) => {
   const { success, data } = PreInterviewBody.safeParse(req.body);
 
@@ -65,10 +71,13 @@ app.post("/api/v1/pre-interview", async (req, res) => {
   const githubUrl = data.github.endsWith("/")
     ? data.github.slice(0, -1)
     : data.github;
+
   const githubUsername = githubUrl.split("/").pop()!;
+
   const { scrapeGithub } = await import("./scrapers/github.ts");
 
   const githubData = await scrapeGithub(githubUsername);
+
   const { prisma } = await import("./db.ts");
 
   // Temporary local user for development
@@ -99,14 +108,72 @@ app.post("/api/v1/pre-interview", async (req, res) => {
   res.json({ id: interview.id });
 });
 
+// --------------------------------------------------
+// DEEPGRAM SHORT-LIVED TOKEN
+// --------------------------------------------------
+
+app.post("/api/v1/deepgram-token", async (_req, res) => {
+  try {
+    if (!process.env.DEEPGRAM_API_KEY) {
+      console.error("DEEPGRAM_API_KEY is missing");
+      res.status(500).json({
+        error: "Deepgram API key is not configured",
+      });
+      return;
+    }
+
+    const response = await fetch("https://api.deepgram.com/v1/auth/grant", {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ttl_seconds: 60,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Deepgram token error:", data);
+
+      res.status(response.status).json({
+        error: "Failed to generate Deepgram token",
+      });
+
+      return;
+    }
+
+    res.json({
+      token: data.access_token,
+    });
+  } catch (error) {
+    console.error("Deepgram token error:", error);
+
+    res.status(500).json({
+      error: "Failed to generate Deepgram token",
+    });
+  }
+});
+
+// --------------------------------------------------
+// OPENAI REALTIME SESSION
+// --------------------------------------------------
+
 app.post("/api/v1/session/:interviewId", async (req, res) => {
   const sessionConfig = JSON.stringify({
     type: "realtime",
     model: "gpt-realtime",
-    audio: { output: { voice: "marin" } },
+    audio: {
+      output: {
+        voice: "marin",
+      },
+    },
   });
 
   const fd = new FormData();
+
   fd.set("sdp", req.body);
   fd.set("session", sessionConfig);
 
@@ -125,22 +192,34 @@ app.post("/api/v1/session/:interviewId", async (req, res) => {
 
     const location = sdpResponse.headers.get("Location");
     const callId = location?.split("/").pop()!;
+
     console.log(callId);
 
     const sdp = await sdpResponse.text();
+
     res.send(sdp);
 
     const { initSideband } = await import("./sideband.ts");
+
     initSideband(callId, req.params.interviewId);
   } catch (error) {
     console.error("Token generation error:", error);
-    res.status(500).json({ error: "Failed to generate token" });
+
+    res.status(500).json({
+      error: "Failed to generate token",
+    });
   }
 });
 
+// --------------------------------------------------
+// SAVE USER RESPONSE
+// --------------------------------------------------
+
 app.post("/api/v1/session/user/response/:interviewId", async (req, res) => {
   const { message } = req.body;
+
   const { prisma } = await import("./db.ts");
+
   await prisma.message.create({
     data: {
       interviewId: req.params.interviewId!,
@@ -149,11 +228,18 @@ app.post("/api/v1/session/user/response/:interviewId", async (req, res) => {
     },
   });
 
-  res.json({ message: "Message saved" });
+  res.json({
+    message: "Message saved",
+  });
 });
+
+// --------------------------------------------------
+// INTERVIEW RESULT
+// --------------------------------------------------
 
 app.get("/api/v1/result/:interviewId", async (req, res) => {
   const { prisma } = await import("./db.ts");
+
   const interview = await prisma.interview.findFirst({
     where: {
       id: req.params.interviewId,
@@ -167,17 +253,20 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     res.status(411).json({
       message: "Interview not found",
     });
+
     return;
   }
 
   res.json({
-    score: interview?.score,
-    feedback: interview?.feedback,
-    transcript: interview?.conversations.map((c) => ({
+    score: interview.score,
+    feedback: interview.feedback,
+
+    transcript: interview.conversations.map((c) => ({
       type: c.type,
       content: c.message,
       createdAt: c.createdAt,
     })),
+
     status: interview.status,
   });
 
@@ -197,8 +286,14 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
   }
 });
 
+// --------------------------------------------------
+// START SERVER
+// --------------------------------------------------
+
 const port = getPort();
+
 logServiceConfiguration();
+
 app.listen(port, () => {
   console.log(`Backend listening on http://localhost:${port}`);
 });
