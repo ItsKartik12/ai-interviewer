@@ -181,6 +181,7 @@ export function Interview() {
   const [audioChunks, setAudioChunks] = useState(0);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [questionNumber, setQuestionNumber] = useState(1);
 
   const [diagnostics, setDiagnostics] = useState<DiagnosticState>({
     micPermission: "unknown",
@@ -210,6 +211,14 @@ export function Interview() {
   const isUnmountingRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const isReconnectingRef = useRef(false);
+  const statusRef = useRef<Status>("requesting-microphone");
+  const userEditedRef = useRef(false);
+  const tokenExpiryTimerRef = useRef<number | null>(null);
+
+  const updateStatus = (nextStatus: Status) => {
+    statusRef.current = nextStatus;
+    setStatus(nextStatus);
+  };
 
   // Sync draft state and ref
   const updateDraft = (newText: string) => {
@@ -235,7 +244,7 @@ export function Interview() {
   function speakAI(text: string) {
     if (!text) return;
     aiSpeakingRef.current = true;
-    setStatus("ai-speaking");
+    updateStatus("ai-speaking");
     setRecorderListening(false);
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -247,20 +256,27 @@ export function Interview() {
     utterance.onend = () => {
       aiSpeakingRef.current = false;
       setRecorderListening(true);
-      setStatus((current) =>
-        current === "submitting"
-          ? current
-          : draftRef.current
-            ? "transcript-ready"
-            : "listening",
+      updateStatus(
+        draftRef.current ? "transcript-ready" : "listening"
       );
     };
     utterance.onerror = () => {
       aiSpeakingRef.current = false;
       setRecorderListening(true);
-      setStatus("listening");
+      updateStatus("listening");
     };
     window.speechSynthesis.speak(utterance);
+  }
+
+  function scheduleTokenRenewal(sessionId: number) {
+    if (tokenExpiryTimerRef.current) window.clearTimeout(tokenExpiryTimerRef.current);
+    // Refresh at 500s (before Deepgram 600s TTL expires)
+    tokenExpiryTimerRef.current = window.setTimeout(() => {
+      if (!isUnmountingRef.current && sessionRef.current === sessionId && statusRef.current !== "ending") {
+        console.info("[voice] Proactively refreshing Deepgram temporary token before 600s TTL expires...");
+        void reconnectVoice();
+      }
+    }, 500000);
   }
 
   /**
@@ -425,8 +441,10 @@ export function Interview() {
           }));
 
           if (!isFinal) {
-            setInterimTranscript(transcript);
-            setStatus("transcribing");
+            if (!userEditedRef.current) {
+              setInterimTranscript(transcript);
+            }
+            updateStatus("transcribing");
             return;
           }
 
@@ -440,7 +458,7 @@ export function Interview() {
 
           updateDraft(nextDraft);
           setInterimTranscript("");
-          setStatus(speechFinal ? "transcript-ready" : "transcribing");
+          updateStatus(speechFinal ? "transcript-ready" : "transcribing");
           if (speechFinal) lastFinalSegmentRef.current = "";
         } catch (transcriptError) {
           console.error("Transcript processing error:", transcriptError);
@@ -475,7 +493,7 @@ export function Interview() {
     if (
       isUnmountingRef.current ||
       isReconnectingRef.current ||
-      status === "ending"
+      statusRef.current === "ending"
     ) {
       return;
     }
@@ -495,7 +513,7 @@ export function Interview() {
         `[voice] Auto-reconnecting attempt ${reconnectAttemptsRef.current}/3 in ${delay}ms...`,
       );
       setTimeout(() => {
-        if (!isUnmountingRef.current && status !== "ending") {
+        if (!isUnmountingRef.current && statusRef.current !== "ending") {
           void reconnectVoice();
         }
       }, delay);
@@ -503,7 +521,7 @@ export function Interview() {
       setError(
         "Speech recognition disconnected. Your draft is saved. Click 'Reconnect Voice' to resume.",
       );
-      setStatus("error");
+      updateStatus("error");
     }
   }
 
@@ -511,14 +529,14 @@ export function Interview() {
    * Reconnect Voice: Fetches fresh token, creates clean WebSocket, restarts recorder, preserves draft.
    */
   async function reconnectVoice() {
-    if (isReconnectingRef.current || isUnmountingRef.current || status === "ending") {
+    if (isReconnectingRef.current || isUnmountingRef.current || statusRef.current === "ending") {
       return;
     }
 
     isReconnectingRef.current = true;
     setIsReconnecting(true);
     setError("");
-    setStatus("connecting-deepgram");
+    updateStatus("connecting-deepgram");
     setDiagnostics((prev) => ({
       ...prev,
       deepgramStatus: "connecting",
@@ -583,6 +601,10 @@ export function Interview() {
       if (!deepgramToken)
         throw new Error("Could not retrieve fresh Deepgram token");
 
+      if (!stream) {
+        throw new Error("Microphone stream is not available");
+      }
+
       // 4. Setup Deepgram and Recorder with the fresh token
       await setupDeepgramAndRecorder(
         deepgramToken,
@@ -590,10 +612,11 @@ export function Interview() {
         sessionRef.current,
       );
 
+      scheduleTokenRenewal(sessionRef.current);
       reconnectAttemptsRef.current = 0;
       console.info("[voice] Voice pipeline reconnected successfully");
 
-      setStatus(draftRef.current ? "transcript-ready" : "listening");
+      updateStatus(draftRef.current ? "transcript-ready" : "listening");
       setDiagnostics((prev) => ({
         ...prev,
         deepgramStatus: "connected",
@@ -824,15 +847,16 @@ export function Interview() {
 
   async function submitAnswer() {
     const answer = draftRef.current.trim();
-    if (!answer || !interviewId || processingRef.current || status === "ending")
+    if (!answer || !interviewId || processingRef.current || statusRef.current === "ending")
       return;
     processingRef.current = true;
     aiSpeakingRef.current = false;
     setRecorderListening(false);
-    setStatus("submitting");
+    updateStatus("submitting");
     setSubmittedAnswer(answer);
     updateDraft("");
     setInterimTranscript("");
+    userEditedRef.current = false;
     lastFinalSegmentRef.current = "";
     setDiagnostics((prev) => ({ ...prev, transcriptStatus: "waiting" }));
 
@@ -841,14 +865,24 @@ export function Interview() {
         `${BACKEND_URL}/api/v1/interview/respond/${interviewId}`,
         { message: answer },
       );
+
+      if (response.data.finished === true) {
+        updateStatus("ending");
+        cleanup();
+        navigate(`/result/${interviewId}`);
+        return;
+      }
+
       const nextQuestion = response.data.message as string;
       setQuestion(nextQuestion);
+      setQuestionNumber((prev) => prev + 1);
 
-      if (response.data.questionType || response.data.skillAssessed) {
+      if (response.data.questionType || response.data.skillAssessed || response.data.difficulty) {
         setContext((prev) => ({
           ...prev,
           questionType: response.data.questionType,
           skillAssessed: response.data.skillAssessed,
+          selfAssessedLevel: response.data.difficulty || prev.selfAssessedLevel,
         }));
       }
 
@@ -856,7 +890,7 @@ export function Interview() {
     } catch (submitError) {
       console.error("Transcript processing error:", submitError);
       setError("Unable to submit this answer. Please try again.");
-      setStatus("error");
+      updateStatus("error");
     } finally {
       processingRef.current = false;
     }
@@ -867,6 +901,8 @@ export function Interview() {
     rafRef.current = null;
     if (keepAliveRef.current) window.clearInterval(keepAliveRef.current);
     keepAliveRef.current = null;
+    if (tokenExpiryTimerRef.current) window.clearTimeout(tokenExpiryTimerRef.current);
+    tokenExpiryTimerRef.current = null;
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       try {
         recorderRef.current.stop();
@@ -898,24 +934,63 @@ export function Interview() {
 
   const aiSpeaking = status === "ai-speaking" || aiLevel > 0.06;
   const userSpeaking = userLevel > 0.06 && !aiSpeaking;
-  const stateLabel =
-    status === "requesting-microphone"
-      ? "Requesting microphone"
-      : status === "connecting-deepgram"
-        ? "Connecting to Deepgram"
-        : status === "transcribing"
-          ? "Transcribing"
-          : status === "transcript-ready"
-            ? "Transcript ready"
-            : status === "submitting"
-              ? "Submitting answer"
-              : status === "ending"
-                ? "Wrapping up"
-                : status === "error"
-                  ? "Needs attention"
-                  : aiSpeaking
-                    ? "AI speaking"
-                    : "Listening";
+
+  const voiceState = (() => {
+    if (isReconnecting || status === "connecting-deepgram") {
+      return {
+        label: "RECONNECTING",
+        desc: "Restoring audio pipeline",
+        badge: "bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse",
+        dot: "bg-amber-400 animate-ping",
+      };
+    }
+    if (status === "error") {
+      return {
+        label: "ERROR",
+        desc: "Microphone attention needed",
+        badge: "bg-destructive/15 text-destructive border-destructive/30",
+        dot: "bg-destructive",
+      };
+    }
+    if (status === "submitting" || status === "ending") {
+      return {
+        label: "PROCESSING",
+        desc: "Analyzing answer & formulating turn",
+        badge: "bg-blue-500/15 text-blue-300 border-blue-500/30 animate-pulse",
+        dot: "bg-blue-400 animate-pulse",
+      };
+    }
+    if (aiSpeaking) {
+      return {
+        label: "AI SPEAKING",
+        desc: "Interviewer speaking (mic muted)",
+        badge: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+        dot: "bg-violet-400 animate-pulse",
+      };
+    }
+    if (status === "transcribing") {
+      return {
+        label: "TRANSCRIBING",
+        desc: "Converting speech to text in real time",
+        badge: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30 animate-pulse",
+        dot: "bg-cyan-400 animate-ping",
+      };
+    }
+    if (status === "listening") {
+      return {
+        label: "LISTENING",
+        desc: "Microphone active • Speak your answer",
+        badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+        dot: "bg-emerald-400",
+      };
+    }
+    return {
+      label: "READY",
+      desc: "Ready to review and submit",
+      badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+      dot: "bg-emerald-400",
+    };
+  })();
 
   const editableStatuses: Status[] = [
     "listening",
@@ -923,9 +998,6 @@ export function Interview() {
     "transcript-ready",
   ];
   const hasConfiguration = context.targetSkill || context.targetRole;
-  const visibleDraft =
-    draft +
-    (interimTranscript ? `${draft ? " " : ""}${interimTranscript}` : "");
 
   const assessment = getPipelineAssessment(diagnostics);
 
@@ -962,17 +1034,13 @@ export function Interview() {
             </Button>
           )}
 
-          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs font-medium">
             <span
-              className={`size-2 rounded-full ${
-                status === "error"
-                  ? "bg-destructive"
-                  : status === "listening" || status === "transcript-ready"
-                    ? "bg-emerald-400"
-                    : "bg-amber-400"
-              }`}
-            />
-            {stateLabel}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${voiceState.badge}`}
+            >
+              <span className={`size-2 rounded-full ${voiceState.dot}`} />
+              {voiceState.label}
+            </span>
           </div>
         </div>
       </header>
@@ -1180,12 +1248,24 @@ export function Interview() {
       <div className="mx-auto grid w-full max-w-5xl flex-1 gap-6 py-6 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
         <section className="order-2 flex flex-col gap-5 lg:order-1">
           <div className="rounded-2xl border border-border bg-card/60 p-5">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Current Question
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+                  Question {questionNumber}
+                </span>
+                {context.selfAssessedLevel && (
+                  <span className="rounded-md border border-border bg-background/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    {context.selfAssessedLevel}
+                  </span>
+                )}
+                {context.questionType && (
+                  <span className="rounded-md border border-border bg-background/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground capitalize">
+                    {context.questionType}
+                  </span>
+                )}
+              </div>
               {context.skillAssessed && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary border border-primary/20">
                   <Sparkles className="size-3" />
                   {context.skillAssessed}
                 </span>
@@ -1199,56 +1279,89 @@ export function Interview() {
           <div className="rounded-2xl border border-border bg-card/60 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
                   Your Answer
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {aiSpeaking
                     ? "Microphone paused while the interviewer speaks."
                     : status === "submitting"
-                      ? "Answer submitted. Preparing the next question…"
-                      : draft
-                        ? "Review or edit the transcript before submitting."
-                        : "Speak clearly into your microphone when ready."}
+                      ? "Answer submitted. Analyzing and preparing the next question…"
+                      : "Review and edit your transcript before submitting."}
                 </p>
               </div>
               <span className="text-xs font-medium text-muted-foreground">
-                {visibleDraft.length} chars
+                {draft.length} chars
               </span>
             </div>
 
             <textarea
-              value={visibleDraft}
+              value={draft}
               onChange={(event) => {
+                userEditedRef.current = true;
                 updateDraft(event.target.value);
                 setInterimTranscript("");
               }}
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  void submitAnswer();
+                }
+              }}
               disabled={!editableStatuses.includes(status) || aiSpeaking}
               placeholder="Your voice transcription will appear here in real time. You can edit this text anytime before submitting..."
-              className="mt-4 min-h-32 w-full resize-y rounded-lg border border-input bg-background px-3 py-3 text-sm leading-relaxed outline-none transition focus:border-ring focus:ring-[3px] focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-4 min-h-32 w-full resize-y rounded-lg border border-input bg-background px-3.5 py-3 text-sm leading-relaxed outline-none transition focus:border-ring focus:ring-[3px] focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
             />
 
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Mic
-                  className={`size-4 ${
-                    aiSpeaking ? "text-muted-foreground" : "text-emerald-400"
-                  }`}
-                />
-                {stateLabel}
+            {interimTranscript && (
+              <div className="mt-2 flex items-center gap-2 rounded-md bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-300 border border-cyan-500/20">
+                <span className="size-2 rounded-full bg-cyan-400 animate-ping" />
+                <span className="font-medium">Live speech:</span>
+                <span className="italic truncate">{interimTranscript}</span>
               </div>
-              <Button
-                onClick={() => void submitAnswer()}
-                disabled={
-                  !draft.trim() ||
-                  !editableStatuses.includes(status) ||
-                  aiSpeaking
-                }
-                className="gap-2"
-              >
-                <Send className="size-4" />
-                Submit answer
-              </Button>
+            )}
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${voiceState.badge}`}>
+                  <span className={`size-2 rounded-full ${voiceState.dot}`} />
+                  {voiceState.label}
+                </span>
+                <span className="text-xs text-muted-foreground hidden sm:inline">
+                  {voiceState.desc}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {draft.trim() && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      userEditedRef.current = false;
+                      updateDraft("");
+                      setInterimTranscript("");
+                    }}
+                    disabled={!editableStatuses.includes(status) || aiSpeaking}
+                    className="text-xs text-muted-foreground hover:text-foreground h-8"
+                  >
+                    Clear Text
+                  </Button>
+                )}
+                <Button
+                  onClick={() => void submitAnswer()}
+                  disabled={
+                    !draft.trim() ||
+                    !editableStatuses.includes(status) ||
+                    aiSpeaking
+                  }
+                  className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <Send className="size-4" />
+                  Submit Answer
+                </Button>
+              </div>
             </div>
           </div>
 

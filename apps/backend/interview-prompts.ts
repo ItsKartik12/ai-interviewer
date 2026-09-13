@@ -11,8 +11,9 @@ export type InterviewMessage = {
 
 export type SkillItem = {
   skill: string;
-  importance: "high" | "medium";
+  importance: "high" | "medium" | "core" | "important" | "bonus";
   reason: string;
+  rationale?: string;
 };
 
 export type RoleSkillRequirement = {
@@ -21,6 +22,7 @@ export type RoleSkillRequirement = {
   level: string;
   technicalSkills: SkillItem[];
   softSkills: SkillItem[];
+  summary?: string;
 };
 
 export type QuestionType =
@@ -209,23 +211,33 @@ function getHeuristicSkills(role: string, level: string): RoleSkillRequirement {
 /**
  * Dynamically generate recommended role skills using OmniRoute with robust heuristic fallback.
  */
+/**
+ * Dynamically generate recommended role skills using OmniRoute with robust heuristic fallback.
+ */
 export async function generateRoleSkills(args: {
   role: string;
-  company: string;
-  level: string;
+  company?: string;
+  level?: string;
   targetSkill?: string;
+  skill?: string;
   githubMetadata?: unknown;
+  context?: string;
 }): Promise<RoleSkillRequirement> {
-  const heuristic = getHeuristicSkills(args.role, args.level);
-  heuristic.company = args.company;
+  const resolvedCompany = args.company || "Target Company";
+  const resolvedLevel = args.level || "Intermediate";
+  const resolvedSkill = args.targetSkill || args.skill || "Software Development";
+
+  const heuristic = getHeuristicSkills(args.role, resolvedLevel);
+  heuristic.company = resolvedCompany;
+  heuristic.summary = `Recommended competencies for ${args.role} at ${resolvedCompany} (${resolvedLevel} level).`;
 
   try {
     const prompt = `You are a principal technical recruiter and engineering leader.
 Analyze this interview target profile and output recommended technical and soft skills for this specific role, company, and seniority level:
 - Target Role: ${args.role}
-- Target Company: ${args.company}
-- Seniority Level: ${args.level}
-- Primary Skill Focus: ${args.targetSkill ?? "Software Development"}
+- Target Company: ${resolvedCompany}
+- Seniority Level: ${resolvedLevel}
+- Primary Skill Focus: ${resolvedSkill}
 - Candidate GitHub context: ${asGithubContext(args.githubMetadata)}
 
 Do NOT claim these are verified official company criteria; frame them as realistic, recommended skills for this profile.
@@ -233,8 +245,9 @@ Do NOT claim these are verified official company criteria; frame them as realist
 Return ONLY valid JSON with this exact shape:
 {
   "role": "${args.role}",
-  "company": "${args.company}",
-  "level": "${args.level}",
+  "company": "${resolvedCompany}",
+  "level": "${resolvedLevel}",
+  "summary": "Recommended evaluation framework for ${args.role} at ${resolvedCompany}",
   "technicalSkills": [
     { "skill": "Skill Name", "importance": "high", "reason": "concise rationale" }
   ],
@@ -263,17 +276,20 @@ Include 3 to 5 key technical skills and 2 to 3 soft skills. Keep rationales conc
     ) {
       return {
         role: args.role,
-        company: args.company,
-        level: args.level,
+        company: resolvedCompany,
+        level: resolvedLevel,
+        summary: parsed.summary || `Recommended competencies for ${args.role} at ${resolvedCompany}`,
         technicalSkills: parsed.technicalSkills.map((item) => ({
           skill: String(item.skill || "Technical Skill"),
           importance: item.importance === "medium" ? "medium" : "high",
-          reason: String(item.reason || "Relevant for the role"),
+          reason: String(item.reason || item.rationale || "Relevant for the role"),
+          rationale: String(item.rationale || item.reason || "Relevant for the role"),
         })),
         softSkills: parsed.softSkills.map((item) => ({
           skill: String(item.skill || "Soft Skill"),
           importance: item.importance === "medium" ? "medium" : "high",
-          reason: String(item.reason || "Essential interpersonal skill"),
+          reason: String(item.reason || item.rationale || "Essential interpersonal skill"),
+          rationale: String(item.rationale || item.reason || "Essential interpersonal skill"),
         })),
       };
     }
@@ -281,7 +297,17 @@ Include 3 to 5 key technical skills and 2 to 3 soft skills. Keep rationales conc
     console.warn("Using heuristic role skills fallback:", error instanceof Error ? error.message : error);
   }
 
-  return heuristic;
+  return {
+    ...heuristic,
+    technicalSkills: heuristic.technicalSkills.map((item) => ({
+      ...item,
+      rationale: item.reason,
+    })),
+    softSkills: heuristic.softSkills.map((item) => ({
+      ...item,
+      rationale: item.reason,
+    })),
+  };
 }
 
 export function buildInterviewSystemPrompt(args: {
@@ -294,9 +320,15 @@ export function buildInterviewSystemPrompt(args: {
   questionCount: number;
   coveredTopics: string[];
   durationMinutes: number;
+  previousQuestions?: string[];
 }): string {
   const topics =
     args.coveredTopics.length > 0 ? args.coveredTopics.join(", ") : "none yet";
+
+  const questionHistory =
+    args.previousQuestions && args.previousQuestions.length > 0
+      ? args.previousQuestions.map((q, i) => `${i + 1}. "${q}"`).join("\n")
+      : "None yet (Turn 1 introduction)";
 
   return `You are a seasoned, supportive, yet rigorous technical interviewer conducting a realistic software interview.
 
@@ -315,24 +347,30 @@ Current Interview State:
 - Difficulty Setting: ${args.difficulty}
 - Topics Already Covered: ${topics}
 
+Questions Already Asked in this Session:
+${questionHistory}
+
 Interview Structure & Pacing:
-- Turn 1: Warm introduction & icebreaker. Welcome the candidate, briefly state that you will cover both technical foundations and project experiences, and ask them to introduce themselves and highlight a key project they worked on.
-- Turn 2: Behavioral / Problem-solving scenario. Calibrate to candidate seniority:
-  * Junior/Beginner: Learning new tools, overcoming a challenging bug, receiving feedback.
-  * Intermediate/Senior: Technical disagreements, leading architectural trade-offs, managing unexpected production outages.
+- Turn 1: Warm introduction & icebreaker.
+  * Welcome candidate to their interview for ${args.targetRole ?? "the position"} at ${args.targetCompany ?? "our company"}.
+  * State the interview structure briefly: starting with a brief background and project discussion, followed by adaptive technical questions.
+  * Ask them to introduce themselves and discuss a standout project they built or are proud of.
+- Turn 2: Behavioral / HR / Project reflection question calibrated to seniority:
+  * Junior/Beginner: Overcoming a challenging bug, learning new tools, receiving constructive critique.
+  * Mid/Senior: Handling technical trade-offs, resolving system failures, architectural disagreements, or why they are passionate about this role.
 - Turn 3+: Core technical assessment. Alternate across question types:
   * Conceptual (fundamental theory & how things work under the hood)
-  * Practical (writing or structuring code for real problems)
-  * Debugging (diagnosing performance leaks or edge-case failures)
+  * Practical (designing or structuring code for real-world scenarios)
+  * Debugging (diagnosing performance leaks, concurrency issues, or edge cases)
   * System Design / Architecture (component composition, scaling, trade-offs)
   * Trade-off questions ("Why choose approach X over Y?")
 
 Strict Rules:
-1. NEVER repeat an already asked question or ask a near-duplicate question.
+1. NEVER repeat an already asked question, re-ask with slightly different wording, or duplicate topics unnecessarily.
 2. Ask exactly ONE concise question at a time. Do not stack multiple questions in one turn.
 3. Adaptive depth:
-   - Strong answer: Acknowledge briefly and increase depth, probe trade-offs, or ask an architecture/edge-case follow-up.
-   - Struggling/Weak answer: Be encouraging, simplify the concept, and verify fundamentals before moving on.
+   - Strong answer demonstrating depth: Acknowledge briefly and increase depth, explore realistic edge cases, or ask a trade-off/architecture follow-up.
+   - Struggling, partial, or hesitant answer: Be encouraging, ask a clarifying or foundational follow-up question to help the candidate reason through the problem instead of abruptly jumping to a difficult topic.
 4. Keep primary skill (${args.targetSkill ?? "General Software Development"}) as the central theme, but incorporate realistic behavioral and engineering practices.
 5. Set finished=true only when 5 to 7 rich questions have been completed and sufficient evidence is collected.
 

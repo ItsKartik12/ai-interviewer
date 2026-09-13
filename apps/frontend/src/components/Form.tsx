@@ -39,8 +39,9 @@ type FieldErrors = Partial<Record<Field, string>>;
 
 interface SkillItem {
   skill: string;
-  importance: "core" | "important" | "bonus";
-  rationale: string;
+  importance?: "core" | "important" | "bonus" | "high" | "medium";
+  rationale?: string;
+  reason?: string;
 }
 
 interface RoleSkillRequirement {
@@ -49,7 +50,7 @@ interface RoleSkillRequirement {
   level: string;
   technicalSkills: SkillItem[];
   softSkills: SkillItem[];
-  summary: string;
+  summary?: string;
 }
 
 export function Form() {
@@ -163,15 +164,17 @@ export function Form() {
   const clearError = (field: Field) =>
     setErrors((current) => ({ ...current, [field]: undefined }));
 
-  function getImportanceBadge(importance: "core" | "important" | "bonus") {
+  function getImportanceBadge(importance?: string) {
     switch (importance) {
       case "core":
+      case "high":
         return (
           <span className="inline-flex items-center rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400 border border-amber-500/20">
             Core Requirement
           </span>
         );
       case "important":
+      case "medium":
         return (
           <span className="inline-flex items-center rounded-md bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400 border border-blue-500/20">
             Important
@@ -181,6 +184,12 @@ export function Form() {
         return (
           <span className="inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/20">
             Bonus / Differentiator
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary border border-primary/20">
+            Recommended
           </span>
         );
     }
@@ -365,16 +374,14 @@ export function Form() {
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-                  Step 2 of 2 • Role Skill Determination
+                  Step 2 of 2 • Interview Plan
                 </p>
                 <h2 className="mt-2 text-xl font-semibold">
-                  Competency Plan for {role}
+                  Recommended skills for this role and level
                 </h2>
-                {company && (
-                  <p className="text-sm text-muted-foreground">
-                    Targeted for {company} standards
-                  </p>
-                )}
+                <p className="text-sm text-muted-foreground">
+                  Tailored competency profile for {role} ({level}) {company ? `• ${company}` : ""}
+                </p>
               </div>
               <Button
                 variant="outline"
@@ -408,7 +415,7 @@ export function Form() {
                 </span>
                 <p className="text-sm font-semibold">{role}</p>
                 <span className="text-xs text-muted-foreground">
-                  Derived from {company || "industry"} benchmarks
+                  Recommended skills for {level.toLowerCase()} level
                 </span>
               </div>
 
@@ -443,7 +450,7 @@ export function Form() {
                         {getImportanceBadge(item.importance)}
                       </div>
                       <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                        {item.rationale}
+                        {item.rationale || item.reason || "Evaluates core capabilities for this role."}
                       </p>
                     </div>
                   </div>
@@ -471,7 +478,7 @@ export function Form() {
                           {getImportanceBadge(item.importance)}
                         </div>
                         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                          {item.rationale}
+                          {item.rationale || item.reason || "Essential interpersonal and communication skill."}
                         </p>
                       </div>
                     </div>

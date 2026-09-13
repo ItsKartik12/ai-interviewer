@@ -89,7 +89,7 @@ app.post("/api/v1/analyze-role", async (req, res) => {
       role: String(role).trim(),
       company: company ? String(company).trim() : undefined,
       level: level ? String(level).trim() : undefined,
-      skill: skill ? String(skill).trim() : undefined,
+      targetSkill: skill ? String(skill).trim() : undefined,
       context: context ? String(context).trim() : undefined,
     });
 
@@ -162,7 +162,7 @@ app.post("/api/v1/pre-interview", async (req, res) => {
         role: data.role,
         company: data.company,
         level: data.level,
-        skill: data.skill,
+        targetSkill: data.skill,
       });
     }
 
@@ -328,6 +328,7 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           questionCount: 0,
           coveredTopics: [],
           durationMinutes: interview.duration,
+          previousQuestions: [],
         }),
       },
       {
@@ -449,6 +450,9 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
           questionCount: questionCount(interview.conversations),
           coveredTopics: coveredTopics(interview.conversations),
           durationMinutes: interview.duration,
+          previousQuestions: interview.conversations
+            .filter((item) => item.type === "Assistant")
+            .map((item) => item.message),
         }),
       },
       {
