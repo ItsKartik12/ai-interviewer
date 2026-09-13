@@ -13,6 +13,13 @@ import {
 import { healthRouter } from "./routes/health.ts";
 import { authRateLimit, globalRateLimit } from "./middleware/rateLimit.ts";
 import { requireAuth, type AuthenticatedRequest } from "./middleware/auth.ts";
+import {
+  buildInterviewSystemPrompt,
+  buildTurnInstruction,
+  coveredTopics,
+  parseInterviewDecision,
+  questionCount,
+} from "./interview-prompts.ts";
 
 const app = express();
 
@@ -68,14 +75,17 @@ app.get(
 
 app.post("/api/v1/pre-interview", async (req, res) => {
   try {
-    const { success, data } = PreInterviewBody.safeParse(req.body);
+    const parsedBody = PreInterviewBody.safeParse(req.body);
 
-    if (!success) {
+    if (!parsedBody.success) {
       res.status(400).json({
-        error: "Incorrect request body",
+        error: "Interview configuration is incomplete or invalid",
+        fields: parsedBody.error.flatten().fieldErrors,
       });
       return;
     }
+
+    const data = parsedBody.data;
 
     const githubUrl = data.github.endsWith("/")
       ? data.github.slice(0, -1)
@@ -113,8 +123,12 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       data: {
         userId: user.uid,
         type: "Technical",
-        role: "Software Developer",
-        difficulty: "Intermediate",
+        role: data.role,
+        difficulty: data.level,
+        targetSkill: data.skill,
+        selfAssessedLevel: data.level,
+        targetCompany: data.company,
+        targetRole: data.role,
         duration: 30,
         githubMetadata: githubData,
         status: "Pre",
@@ -244,31 +258,24 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       return;
     }
 
-    const githubContext =
-      interview.githubMetadata && typeof interview.githubMetadata === "object"
-        ? JSON.stringify(interview.githubMetadata)
-        : "No GitHub information available.";
-
     const aiResponse = await askOmniRoute([
       {
         role: "system",
-        content:
-          "You are a professional technical interviewer. " +
-          "You are conducting a realistic software developer interview. " +
-          "Ask one question at a time. " +
-          "Keep your response concise. " +
-          "Start the interview naturally. " +
-          "Use the candidate's GitHub information when useful. " +
-          "Do not provide answers to questions. " +
-          "The interview should test practical software development knowledge.\n\n" +
-          "Candidate GitHub information:\n" +
-          githubContext,
+        content: buildInterviewSystemPrompt({
+          githubMetadata: interview.githubMetadata,
+          difficulty: interview.difficulty,
+          targetSkill: interview.targetSkill,
+          selfAssessedLevel: interview.selfAssessedLevel,
+          targetCompany: interview.targetCompany,
+          targetRole: interview.targetRole,
+          questionCount: 0,
+          coveredTopics: [],
+          durationMinutes: interview.duration,
+        }),
       },
       {
         role: "user",
-        content:
-          "Start the technical interview. " +
-          "Ask the candidate the first appropriate question.",
+        content: buildTurnInstruction({ messages: [], firstTurn: true }),
       },
     ]);
 
@@ -276,16 +283,27 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       throw new Error("OmniRoute returned an empty response");
     }
 
+    const decision = parseInterviewDecision(aiResponse, interview.difficulty);
+
     await prisma.message.create({
       data: {
         interviewId: interview.id,
         type: "Assistant",
-        message: aiResponse,
+        message: decision.question,
+      },
+    });
+
+    await prisma.interview.update({
+      where: { id: interview.id },
+      data: {
+        status: "InProgress",
+        startedAt: interview.startedAt ?? new Date(),
+        difficulty: decision.difficulty,
       },
     });
 
     res.json({
-      message: aiResponse,
+      message: decision.question,
     });
   } catch (error) {
     console.error("Interview start error:", error);
@@ -350,48 +368,59 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       content: message,
     });
 
-    const githubContext =
-      interview.githubMetadata && typeof interview.githubMetadata === "object"
-        ? JSON.stringify(interview.githubMetadata)
-        : "No GitHub information available.";
-
-    // Ask OmniRoute
     const aiResponse = await askOmniRoute([
       {
         role: "system",
-        content:
-          "You are a professional technical interviewer. " +
-          "Conduct a realistic software developer interview. " +
-          "Ask one question at a time. " +
-          "Keep questions concise. " +
-          "Do not give the candidate the answer. " +
-          "Adapt difficulty based on the candidate's responses. " +
-          "Ask follow-up questions when appropriate. " +
-          "Focus on software development, programming, " +
-          "data structures, algorithms, web development, " +
-          "databases, APIs and practical engineering concepts " +
-          "when relevant.\n\n" +
-          "Candidate GitHub information:\n" +
-          githubContext,
+        content: buildInterviewSystemPrompt({
+          githubMetadata: interview.githubMetadata,
+          difficulty: interview.difficulty,
+          targetSkill: interview.targetSkill,
+          selfAssessedLevel: interview.selfAssessedLevel,
+          targetCompany: interview.targetCompany,
+          targetRole: interview.targetRole,
+          questionCount: questionCount(interview.conversations),
+          coveredTopics: coveredTopics(interview.conversations),
+          durationMinutes: interview.duration,
+        }),
       },
-      ...conversation,
+      {
+        role: "user",
+        content: buildTurnInstruction({
+          messages: interview.conversations,
+          latestAnswer: message,
+        }),
+      },
     ]);
 
     if (!aiResponse) {
       throw new Error("OmniRoute returned an empty response");
     }
 
+    const decision = parseInterviewDecision(aiResponse, interview.difficulty);
+
     // Save AI response
     await prisma.message.create({
       data: {
         interviewId: interview.id,
         type: "Assistant",
-        message: aiResponse,
+        message: decision.question,
+      },
+    });
+
+    await prisma.interview.update({
+      where: { id: interview.id },
+      data: {
+        status: "InProgress",
+        difficulty: decision.difficulty,
       },
     });
 
     res.json({
-      message: aiResponse,
+      message: decision.question,
+      difficulty: decision.difficulty,
+      topic: decision.topic,
+      followUp: decision.followUp,
+      finished: decision.finished,
     });
   } catch (error) {
     console.error("Interview response error:", error);
@@ -431,7 +460,10 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     let status = interview.status;
 
     if (interview.status !== "Done") {
-      const result = await calculateResult(interview.conversations);
+      const result = await calculateResult(
+        interview.conversations,
+        interview.githubMetadata,
+      );
 
       const updatedInterview = await prisma.interview.update({
         where: {
@@ -439,20 +471,39 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
         },
         data: {
           status: "Done",
-          feedback: result.feedback,
+          feedback: result.overallFeedback,
           score: result.score,
+          evaluation: result,
+          strengthsList: result.strengths,
+          weaknessesList: result.weaknesses,
+          recommendations: result.topicsToImprove,
+          completedAt: new Date(),
         },
       });
 
       score = updatedInterview.score;
       feedback = updatedInterview.feedback;
       status = updatedInterview.status;
+
+      res.json({
+        score,
+        feedback,
+        status,
+        evaluation: result,
+        transcript: interview.conversations.map((conversation) => ({
+          type: conversation.type,
+          content: conversation.message,
+          createdAt: conversation.createdAt,
+        })),
+      });
+      return;
     }
 
     res.json({
       score,
       feedback,
       status,
+      evaluation: interview.evaluation,
 
       transcript: interview.conversations.map((conversation) => ({
         type: conversation.type,

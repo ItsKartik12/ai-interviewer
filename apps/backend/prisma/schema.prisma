@@ -41,6 +41,10 @@ model Interview {
   type                  InterviewType       // technical, behavioral, hr, mixed
   role                  String              // Frontend Developer, Backend, etc.
   difficulty            InterviewDifficulty // beginner, intermediate, advanced
+  targetSkill           String?
+  selfAssessedLevel     InterviewDifficulty?
+  targetCompany         String?
+  targetRole            String?
   duration              Int                 // minutes
   jobDescription        String?
   
@@ -55,6 +59,7 @@ model Interview {
   // Results
   score                 Int?                // 0-100
   feedback              String?             // AI-generated feedback
+  evaluation            Json?               // Structured final evaluation
   strengthsList         String[]            @default([])
   weaknessesList        String[]            @default([])
   recommendations       String[]            @default([])
