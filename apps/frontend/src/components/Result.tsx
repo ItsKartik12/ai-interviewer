@@ -197,8 +197,8 @@ export function Result() {
                       className={cn(
                         "grid size-8 shrink-0 place-items-center rounded-full text-white",
                         isAi
-                          ? "bg-gradient-to-br from-violet-400 to-indigo-600"
-                          : "bg-gradient-to-br from-emerald-300 to-teal-600",
+                          ? "bg-linear-to-br from-violet-400 to-indigo-600"
+                          : "bg-linear-to-br from-emerald-300 to-teal-600",
                       )}
                     >
                       {isAi ? (

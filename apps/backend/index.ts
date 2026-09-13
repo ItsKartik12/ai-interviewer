@@ -175,7 +175,9 @@ app.post("/api/v1/deepgram-token", async (_req, res) => {
       }),
     });
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      access_token?: unknown;
+    };
 
     if (!response.ok) {
       console.error("Deepgram token error:", data);

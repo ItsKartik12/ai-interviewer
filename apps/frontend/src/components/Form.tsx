@@ -66,7 +66,7 @@ export function Form() {
           Voice-based technical interview
         </span>
 
-        <h1 className="bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-4xl font-bold tracking-tight text-transparent sm:text-5xl">
+        <h1 className="bg-linear-to-b from-foreground to-foreground/60 bg-clip-text text-4xl font-bold tracking-tight text-transparent sm:text-5xl">
           AI Interview Kickstart
         </h1>
         <p className="mt-4 max-w-md text-balance text-base text-muted-foreground">

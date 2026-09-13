@@ -4,6 +4,11 @@ const OMNIROUTE_API_KEY = process.env.OMNIROUTE_API_KEY;
 
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "oc/big-pickle";
 
+type OmniRouteResponse = {
+  error?: { message?: string };
+  choices?: { message?: { content?: unknown } }[];
+};
+
 export async function askOmniRoute(
   messages: {
     role: "system" | "user" | "assistant";
@@ -27,7 +32,7 @@ export async function askOmniRoute(
     }),
   });
 
-  const data = await response.json();
+  const data = (await response.json()) as OmniRouteResponse;
 
   if (!response.ok) {
     console.error("OmniRoute error:", data);
