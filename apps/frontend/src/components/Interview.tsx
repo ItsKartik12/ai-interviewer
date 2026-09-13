@@ -214,6 +214,9 @@ export function Interview() {
   const statusRef = useRef<Status>("requesting-microphone");
   const userEditedRef = useRef(false);
   const tokenExpiryTimerRef = useRef<number | null>(null);
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const utteranceWatchdogRef = useRef<number | null>(null);
+  const userMeterRef = useRef<(() => number) | null>(null);
 
   const updateStatus = (nextStatus: Status) => {
     statusRef.current = nextStatus;
@@ -226,46 +229,81 @@ export function Interview() {
     setDraft(newText);
   };
 
-  function setRecorderListening(listening: boolean) {
-    const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
-    if (listening && recorder.state === "paused") {
-      recorder.resume();
-      console.info("[voice] microphone listening resumed");
-      setDiagnostics((prev) => ({ ...prev, recorderStatus: "recording" }));
+  function setMicrophoneMuted(muted: boolean) {
+    if (userStreamRef.current) {
+      userStreamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
     }
-    if (!listening && recorder.state === "recording") {
-      recorder.pause();
-      console.info("[voice] microphone transmission paused");
-      setDiagnostics((prev) => ({ ...prev, recorderStatus: "paused" }));
+    setDiagnostics((prev) => ({
+      ...prev,
+      audioTrackStatus: muted ? "muted" : "live",
+    }));
+  }
+
+  function clearUtteranceWatchdog() {
+    if (utteranceWatchdogRef.current) {
+      window.clearTimeout(utteranceWatchdogRef.current);
+      utteranceWatchdogRef.current = null;
     }
   }
 
   function speakAI(text: string) {
     if (!text) return;
+    clearUtteranceWatchdog();
     aiSpeakingRef.current = true;
     updateStatus("ai-speaking");
-    setRecorderListening(false);
-    window.speechSynthesis.cancel();
+    setMicrophoneMuted(true);
+
+    try {
+      window.speechSynthesis.cancel();
+    } catch {}
+
     const utterance = new SpeechSynthesisUtterance(text);
+    activeUtteranceRef.current = utterance;
     utterance.rate = 0.95;
+
+    const finishSpeaking = () => {
+      clearUtteranceWatchdog();
+      if (!isUnmountingRef.current && statusRef.current !== "ending") {
+        aiSpeakingRef.current = false;
+        activeUtteranceRef.current = null;
+        setMicrophoneMuted(false);
+        updateStatus(draftRef.current ? "transcript-ready" : "listening");
+      }
+    };
+
     utterance.onstart = () => {
       aiSpeakingRef.current = true;
-      setRecorderListening(false);
+      setMicrophoneMuted(true);
     };
     utterance.onend = () => {
-      aiSpeakingRef.current = false;
-      setRecorderListening(true);
-      updateStatus(
-        draftRef.current ? "transcript-ready" : "listening"
-      );
+      finishSpeaking();
     };
     utterance.onerror = () => {
-      aiSpeakingRef.current = false;
-      setRecorderListening(true);
-      updateStatus("listening");
+      finishSpeaking();
     };
-    window.speechSynthesis.speak(utterance);
+
+    // Chrome SpeechSynthesis Watchdog: prevents perpetual AI SPEAKING state if onend fails to fire
+    const wordCount = text.trim().split(/\s+/).length;
+    const estimatedDurationMs = Math.max(5000, (wordCount / 2.2) * 1000 + 4000);
+    utteranceWatchdogRef.current = window.setTimeout(() => {
+      if (aiSpeakingRef.current) {
+        console.warn("[voice] SpeechSynthesis watchdog expired; restoring microphone listening");
+        finishSpeaking();
+      }
+    }, estimatedDurationMs);
+
+    setTimeout(() => {
+      if (!isUnmountingRef.current && aiSpeakingRef.current) {
+        try {
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.warn("[voice] SpeechSynthesis speak invocation error:", e);
+          finishSpeaking();
+        }
+      }
+    }, 50);
   }
 
   function scheduleTokenRenewal(sessionId: number) {
@@ -273,6 +311,13 @@ export function Interview() {
     // Refresh at 500s (before Deepgram 600s TTL expires)
     tokenExpiryTimerRef.current = window.setTimeout(() => {
       if (!isUnmountingRef.current && sessionRef.current === sessionId && statusRef.current !== "ending") {
+        if (draftRef.current.trim() || interimTranscript) {
+          console.info("[voice] Candidate actively answering; delaying token renewal by 15s");
+          tokenExpiryTimerRef.current = window.setTimeout(() => {
+            scheduleTokenRenewal(sessionId);
+          }, 15000);
+          return;
+        }
         console.info("[voice] Proactively refreshing Deepgram temporary token before 600s TTL expires...");
         void reconnectVoice();
       }
@@ -328,7 +373,6 @@ export function Interview() {
           recorder.ondataavailable = (event) => {
             if (
               event.data.size === 0 ||
-              aiSpeakingRef.current ||
               socket.readyState !== WebSocket.OPEN
             ) {
               return;
@@ -338,7 +382,6 @@ export function Interview() {
               if (
                 isUnmountingRef.current ||
                 sessionRef.current !== sessionId ||
-                aiSpeakingRef.current ||
                 socket.readyState !== WebSocket.OPEN
               ) {
                 return;
@@ -391,13 +434,19 @@ export function Interview() {
             recorderMimeType: mimeType,
           }));
 
-          // Keepalive to prevent Deepgram timeout during silence / AI speech
+          // Unconditional 3-second heartbeat keeps Deepgram WebSocket alive during candidate thinking,
+          // answer editing, and backend LLM generation (preventing 12.8s NET-0001 code 1011 idle timeout)
           if (keepAliveRef.current) window.clearInterval(keepAliveRef.current);
+          try {
+            socket.send(JSON.stringify({ type: "KeepAlive" }));
+          } catch {}
           keepAliveRef.current = window.setInterval(() => {
-            if (socket.readyState === WebSocket.OPEN && aiSpeakingRef.current) {
-              socket.send(JSON.stringify({ type: "KeepAlive" }));
+            if (socket.readyState === WebSocket.OPEN) {
+              try {
+                socket.send(JSON.stringify({ type: "KeepAlive" }));
+              } catch {}
             }
-          }, 5000);
+          }, 3000);
 
           resolve();
         } catch (recErr) {
@@ -549,12 +598,16 @@ export function Interview() {
         window.clearInterval(keepAliveRef.current);
         keepAliveRef.current = null;
       }
-      if (recorderRef.current && recorderRef.current.state !== "inactive") {
-        try {
-          recorderRef.current.stop();
-        } catch {}
+      if (recorderRef.current) {
+        recorderRef.current.ondataavailable = null;
+        recorderRef.current.onerror = null;
+        if (recorderRef.current.state !== "inactive") {
+          try {
+            recorderRef.current.stop();
+          } catch {}
+        }
+        recorderRef.current = null;
       }
-      recorderRef.current = null;
 
       if (socketRef.current) {
         socketRef.current.onopen = null;
@@ -571,11 +624,14 @@ export function Interview() {
       let stream = userStreamRef.current;
       const isStreamLive =
         stream &&
-        stream
-          .getAudioTracks()
-          .some((t) => t.readyState === "live" && t.enabled);
+        stream.getAudioTracks().length > 0 &&
+        stream.getAudioTracks().some((t) => t.readyState === "live");
 
-      if (!isStreamLive) {
+      if (isStreamLive && stream) {
+        stream.getAudioTracks().forEach((t) => {
+          t.enabled = true;
+        });
+      } else {
         console.info("[voice] Audio track inactive, requesting fresh stream");
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -585,13 +641,17 @@ export function Interview() {
           },
         });
         userStreamRef.current = stream;
-        setDiagnostics((prev) => ({
-          ...prev,
-          micPermission: "granted",
-          micDeviceDetected: true,
-          audioTrackStatus: "live",
-        }));
+        if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+          userMeterRef.current = createLevelMeter(audioCtxRef.current, stream);
+        }
       }
+
+      setDiagnostics((prev) => ({
+        ...prev,
+        micPermission: "granted",
+        micDeviceDetected: true,
+        audioTrackStatus: "live",
+      }));
 
       // 3. Request fresh Deepgram temporary token (TTL: 600s)
       const tokenResponse = await axios.post(
@@ -769,6 +829,7 @@ export function Interview() {
 
         userStreamRef.current = mediaStream;
         const userMeter = createLevelMeter(audioCtx, mediaStream);
+        userMeterRef.current = userMeter;
 
         setDiagnostics((prev) => ({
           ...prev,
@@ -815,7 +876,8 @@ export function Interview() {
         // Animation frame for visualizer
         const tick = () => {
           if (!isCurrentSession()) return;
-          setUserLevel(aiSpeakingRef.current ? 0 : userMeter());
+          const currentMeter = userMeterRef.current;
+          setUserLevel(aiSpeakingRef.current ? 0 : (currentMeter ? currentMeter() : 0));
           setAiLevel(
             window.speechSynthesis.speaking ? 0.15 + Math.random() * 0.35 : 0,
           );
@@ -851,7 +913,9 @@ export function Interview() {
       return;
     processingRef.current = true;
     aiSpeakingRef.current = false;
-    setRecorderListening(false);
+    clearUtteranceWatchdog();
+    window.speechSynthesis.cancel();
+    setMicrophoneMuted(true);
     updateStatus("submitting");
     setSubmittedAnswer(answer);
     updateDraft("");
@@ -886,29 +950,40 @@ export function Interview() {
         }));
       }
 
-      if (nextQuestion) speakAI(nextQuestion);
+      if (nextQuestion) {
+        speakAI(nextQuestion);
+      } else {
+        setMicrophoneMuted(false);
+        updateStatus("listening");
+      }
     } catch (submitError) {
       console.error("Transcript processing error:", submitError);
       setError("Unable to submit this answer. Please try again.");
       updateStatus("error");
+      setMicrophoneMuted(false);
     } finally {
       processingRef.current = false;
     }
   }
 
   function cleanup() {
+    clearUtteranceWatchdog();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     if (keepAliveRef.current) window.clearInterval(keepAliveRef.current);
     keepAliveRef.current = null;
     if (tokenExpiryTimerRef.current) window.clearTimeout(tokenExpiryTimerRef.current);
     tokenExpiryTimerRef.current = null;
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      try {
-        recorderRef.current.stop();
-      } catch {}
+    if (recorderRef.current) {
+      recorderRef.current.ondataavailable = null;
+      recorderRef.current.onerror = null;
+      if (recorderRef.current.state !== "inactive") {
+        try {
+          recorderRef.current.stop();
+        } catch {}
+      }
+      recorderRef.current = null;
     }
-    recorderRef.current = null;
     if (socketRef.current) {
       socketRef.current.onopen = null;
       socketRef.current.onclose = null;
@@ -921,6 +996,7 @@ export function Interview() {
     }
     userStreamRef.current?.getTracks().forEach((track) => track.stop());
     userStreamRef.current = null;
+    activeUtteranceRef.current = null;
     window.speechSynthesis.cancel();
     audioCtxRef.current?.close().catch(() => {});
     audioCtxRef.current = null;
@@ -1021,7 +1097,10 @@ export function Interview() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void reconnectVoice()}
+              onClick={() => {
+                reconnectAttemptsRef.current = 0;
+                void reconnectVoice();
+              }}
               disabled={isReconnecting}
               className="gap-1.5 text-xs border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
             >
@@ -1233,7 +1312,10 @@ export function Interview() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => void reconnectVoice()}
+                  onClick={() => {
+                    reconnectAttemptsRef.current = 0;
+                    void reconnectVoice();
+                  }}
                   disabled={isReconnecting}
                   className="h-6 px-2 text-[11px] shrink-0"
                 >
@@ -1378,7 +1460,10 @@ export function Interview() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => void reconnectVoice()}
+                onClick={() => {
+                  reconnectAttemptsRef.current = 0;
+                  void reconnectVoice();
+                }}
                 disabled={isReconnecting}
                 className="h-7 text-xs border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
               >
