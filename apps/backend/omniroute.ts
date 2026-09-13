@@ -19,25 +19,54 @@ export async function askOmniRoute(
     throw new Error("OMNIROUTE_API_KEY is not configured");
   }
 
-  const response = await fetch(`${OMNIROUTE_URL}/v1/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OMNIROUTE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OMNIROUTE_MODEL,
-      messages,
-      temperature: 0.7,
-    }),
-  });
+  const endpoint = `${OMNIROUTE_URL.replace(/\/$/, "")}/v1/chat/completions`;
+  const requestBody = {
+    model: OMNIROUTE_MODEL,
+    messages,
+    temperature: 0.7,
+  };
 
-  const data = (await response.json()) as OmniRouteResponse;
+  let response: Response;
+
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OMNIROUTE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+  } catch (error) {
+    console.error("OmniRoute request failed", {
+      endpoint,
+      model: OMNIROUTE_MODEL,
+      failureType: error instanceof Error ? error.name : typeof error,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error("OmniRoute is unavailable");
+  }
+
+  const responseText = await response.text();
+  let data: OmniRouteResponse;
+
+  try {
+    data = JSON.parse(responseText) as OmniRouteResponse;
+  } catch {
+    data = {};
+  }
 
   if (!response.ok) {
-    console.error("OmniRoute error:", data);
+    console.error("OmniRoute error", {
+      status: response.status,
+      endpoint,
+      model: OMNIROUTE_MODEL,
+      responseBody: responseText.slice(0, 4000),
+    });
 
-    throw new Error(data?.error?.message || "OmniRoute request failed");
+    throw new Error(
+      data.error?.message || `OmniRoute request failed (${response.status})`,
+    );
   }
 
   const content = data.choices?.[0]?.message?.content;

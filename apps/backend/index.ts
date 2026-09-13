@@ -255,6 +255,10 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
         message:
           firstAssistantMessage?.message ??
           "Let's begin the interview. Please introduce yourself.",
+        targetSkill: interview.targetSkill,
+        targetRole: interview.targetRole,
+        targetCompany: interview.targetCompany,
+        selfAssessedLevel: interview.selfAssessedLevel,
       });
 
       return;
@@ -306,6 +310,10 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
 
     res.json({
       message: decision.question,
+      targetSkill: interview.targetSkill,
+      targetRole: interview.targetRole,
+      targetCompany: interview.targetCompany,
+      selfAssessedLevel: interview.selfAssessedLevel,
     });
   } catch (error) {
     console.error("Interview start error:", error);
@@ -506,6 +514,10 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
       feedback,
       status,
       evaluation: interview.evaluation,
+      targetSkill: interview.targetSkill,
+      targetRole: interview.targetRole,
+      targetCompany: interview.targetCompany,
+      selfAssessedLevel: interview.selfAssessedLevel,
 
       transcript: interview.conversations.map((conversation) => ({
         type: conversation.type,

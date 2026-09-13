@@ -15,6 +15,10 @@ interface ResultData {
   score: number;
   feedback: string;
   status: "Done" | "InProgress" | "Pre";
+  targetSkill?: string | null;
+  targetRole?: string | null;
+  targetCompany?: string | null;
+  selfAssessedLevel?: string | null;
   evaluation?: {
     technicalKnowledge: number;
     problemSolving: number;
@@ -35,23 +39,32 @@ export function Result() {
     transcript: [],
     status: "Pre",
   });
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const fetchResult = () =>
-      axios
-        .get(`${BACKEND_URL}/api/v1/result/${interviewId}`)
-        .then((response) => {
-          setResult(response.data);
-          return response.data.status as ResultData["status"];
-        });
+    let cancelled = false;
+    let intervalId: number | undefined;
 
-    fetchResult();
-    const intervalId = setInterval(async () => {
-      const s = await fetchResult();
-      if (s === "Done") clearInterval(intervalId);
-    }, 5000);
+    const fetchResult = async () => {
+      try {
+        const response = await axios.get(
+          `${BACKEND_URL}/api/v1/result/${interviewId}`,
+        );
+        if (cancelled) return;
+        setResult(response.data);
+        if (response.data.status === "Done" && intervalId)
+          window.clearInterval(intervalId);
+      } catch {
+        if (!cancelled) setError("Unable to load your interview results.");
+      }
+    };
 
-    return () => clearInterval(intervalId);
+    void fetchResult();
+    intervalId = window.setInterval(() => void fetchResult(), 5000);
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+    };
   }, [interviewId]);
 
   const ready = result.status === "Done";
@@ -71,6 +84,32 @@ export function Result() {
           New interview
         </Button>
       </header>
+
+      {(result.targetSkill || result.targetRole) && (
+        <section className="mb-8 rounded-xl border border-border bg-card/50 p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            Assessment
+          </p>
+          <p className="mt-2 text-lg font-semibold">
+            {result.targetSkill ?? "Technical interview"}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {result.targetRole ?? "Software Developer"}
+            {result.targetCompany ? ` @ ${result.targetCompany}` : ""}
+          </p>
+          {result.selfAssessedLevel && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Self-assessed level: {result.selfAssessedLevel}
+            </p>
+          )}
+        </section>
+      )}
+
+      {error && (
+        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {!ready ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-border bg-card/50 py-24 text-center">
