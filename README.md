@@ -1,400 +1,799 @@
-AI Interviewer
+<div align="center">
 
-An adaptive, voice-enabled AI interview platform for realistic
-technical and behavioral interviews, adaptive questioning, real-time
-transcription, and evidence-backed skill assessment.
+# 🤖 AI Interviewer
 
-✨ Features
+### Adaptive • Voice-Powered • Evidence-Based Technical Interviewing
 
-🎯 Role, company, seniority, and skill targeted interviews
+<p>
+  <strong>AI Interviewer is an intelligent interview and skill-assessment engine that conducts realistic technical and behavioral interviews, adapts to candidate performance, analyzes spoken answers, and produces structured skill-level assessments.</strong>
+</p>
 
-🧠 AI-generated technical and soft-skill interview plans
+<p>
+  <a href="https://github.com/ItsKartik12/ai-interviewer">
+    <img src="https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github" alt="GitHub">
+  </a>
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
+  <img src="https://img.shields.io/badge/TypeScript-Ready-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Bun-Runtime-F9F1E1?style=for-the-badge&logo=bun&logoColor=black" alt="Bun">
+  <img src="https://img.shields.io/badge/Deepgram-Voice-101010?style=for-the-badge&logo=deepgram&logoColor=white" alt="Deepgram">
+  <img src="https://img.shields.io/badge/PostgreSQL-Database-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
+</p>
 
-🔄 Adaptive questioning based on previous answers
+<p>
+  <a href="#-what-is-ai-interviewer">What is it?</a> •
+  <a href="#-how-the-interview-works">How it works</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-voice-engine">Voice Engine</a> •
+  <a href="#-evaluation-engine">Evaluation</a> •
+  <a href="#-setup">Setup</a> •
+  <a href="#-roadmap">Roadmap</a>
+</p>
 
-📈 Dynamic difficulty adjustment
+</div>
 
-🗣️ Real-time voice interviews using Deepgram
+---
 
-✍️ Editable transcripts before submission
+<details open>
+<summary><strong>📌 Project at a Glance</strong></summary>
 
-🤖 Browser-based AI interviewer speech
+<br>
 
-🔎 GitHub/project-aware questioning
+| Area                | Implementation                                                              |
+| ------------------- | --------------------------------------------------------------------------- |
+| Interview type      | Technical + behavioral + project-focused                                    |
+| Interaction         | Voice + editable text transcript                                            |
+| Question generation | AI-driven and context-aware                                                 |
+| Adaptation          | Previous answers, difficulty, topic coverage                                |
+| Speech-to-text      | Deepgram WebSocket                                                          |
+| AI speech           | Browser Speech Synthesis                                                    |
+| LLM gateway         | OmniRoute                                                                   |
+| Backend             | Express 5 + TypeScript + Bun                                                |
+| Frontend            | React 19 + TypeScript                                                       |
+| Database            | PostgreSQL + Prisma                                                         |
+| Repository          | [ItsKartik12/ai-interviewer](https://github.com/ItsKartik12/ai-interviewer) |
+| Primary purpose     | Candidate assessment and structured skill evaluation                        |
+| Integration goal    | Larger SIH / career-development platform                                    |
 
-🚫 Question repetition avoidance
+</details>
 
-📊 Technical, communication, and problem-solving assessment
+# 🎯 What is AI Interviewer?
 
-📝 Evidence-backed final evaluation report
+**AI Interviewer** is an adaptive AI-powered interview platform designed to simulate a realistic technical interview rather than behave like a static question generator.
 
-🔐 Temporary Deepgram authentication
+A candidate provides interview context such as:
 
-⚡ Bun/Turborepo development workflow
+- Target role
+- Target company
+- Current level
+- Primary skill
+- GitHub/project context
 
-🗄️ Prisma + PostgreSQL data layer
+The system analyzes this information, identifies relevant skills, creates an interview plan, and conducts the interview.
 
-🔌 OmniRoute LLM gateway
+The important part is what happens **after each answer**.
 
-🧱 Designed to integrate with a larger SIH/career platform
+Instead of:
 
-🧭 How It Works
+```text
+Question 1
+Question 2
+Question 3
+Question 4
+Question 5
+```
 
-Candidate
+the system follows an adaptive loop:
+
+```text
+Ask
+ ↓
+Listen
+ ↓
+Transcribe
+ ↓
+Evaluate
+ ↓
+Understand candidate performance
+ ↓
+Choose next topic / difficulty
+ ↓
+Ask a better follow-up
+ ↓
+Repeat
+```
+
+At the end, the system converts the interview into an **evidence-backed skill assessment** that can later be consumed by a larger platform.
+
+---
+
+# 💡 Why This Project?
+
+Traditional interview practice platforms often have one of two problems:
+
+### 📚 Static question banks
+
+They can provide many questions, but they do not meaningfully react to the candidate.
+
+### 💬 Generic AI chat
+
+A chatbot can ask questions, but it may not maintain a structured assessment model or produce useful skill-level evidence.
+
+AI Interviewer is designed to sit between those approaches:
+
+> **A conversational interviewer on the surface, with a structured assessment engine underneath.**
+
+The goal is not simply to generate an interview.
+
+The goal is to answer:
+
+> **"What does this candidate actually demonstrate?"**
+
+---
+
+# 🧭 How the Interview Works
+
+<details open>
+<summary><strong>1️⃣ Candidate Setup</strong></summary>
+
+<br>
+
+The candidate provides the interview context.
+
+```text
+Target Role       → Frontend Engineer
+Target Company    → Google
+Current Level     → Intermediate
+Primary Skill     → React
+GitHub / Projects → Available context
+```
+
+This context is used to make the interview relevant to the candidate.
+
+</details>
+
+<details>
+<summary><strong>2️⃣ Role & Skill Analysis</strong></summary>
+
+<br>
+
+The system determines the technical and soft skills that should be considered for the selected role.
+
+For example:
+
+```text
+Frontend Engineer
 │
-├── Role
-├── Company
-├── Level
-├── Primary Skill
-└── GitHub / Project Context
-│
-▼
-Role & Skill Analysis
-│
-▼
-Interview Plan
-│
-▼
-AI Introduction
-│
-▼
-Behavioral / Basic Questions
-│
-▼
-Adaptive Technical Questions
-│
-├── Voice Answer
-│ ↓
-│ Deepgram STT
-│ ↓
-│ Editable Transcript
-│ ↓
-│ Answer Evaluation
-│ ↓
-│ Next Question
-│
-▼
-Final Evaluation
-│
-▼
-Structured Skill Assessment
-│
-▼
-Main SIH Platform
+├── React
+├── JavaScript
+├── State Management
+├── Component Design
+├── Problem Solving
+└── Communication
+```
 
-The interviewer is designed to react to the candidate, rather than
-simply follow a fixed questionnaire.
+The interviewer then uses these skills to guide question generation and assessment.
 
-🧠 Adaptive Interviewing
+</details>
 
-Questions use available interview context such as:
+<details>
+<summary><strong>3️⃣ Interview Introduction</strong></summary>
 
-Target role
+<br>
 
-Target company
+The interviewer starts with a short introduction and a warm project/background question.
 
-Candidate level
+This avoids immediately dropping the candidate into a difficult technical problem.
 
-Selected skill
+</details>
 
-Recommended role skills
+<details>
+<summary><strong>4️⃣ Behavioral & Basic Questions</strong></summary>
 
-Previous questions
+<br>
 
-Previous answers
+The interview can cover:
 
-GitHub/project context
+- Background
+- Project experience
+- Strengths and weaknesses
+- Communication
+- Decision making
+- Project reflection
+- Basic role-related questions
 
-Current difficulty
+These questions help establish communication and reasoning context before deeper technical questions.
 
-Topics already covered
+</details>
 
-Question styles can include:
+<details>
+<summary><strong>5️⃣ Adaptive Technical Interview</strong></summary>
 
-Conceptual
+<br>
 
-Practical
+Technical questions can change based on the candidate's previous answers.
 
-Debugging
+Possible question styles include:
 
-Scenario-based
+- Conceptual
+- Practical
+- Debugging
+- Scenario-based
+- Architecture
+- Trade-off
+- Project-specific
+- Follow-up
 
-Architecture
+The system also tracks previously asked questions and covered topics to reduce unnecessary repetition.
 
-Trade-offs
+</details>
 
-Project-specific
+<details>
+<summary><strong>6️⃣ Final Assessment</strong></summary>
 
-Behavioral
+<br>
 
-Communication
+After the interview, the system produces a structured report containing:
 
-A typical progression may look like:
+- Overall performance
+- Demonstrated skill level
+- Technical skill scores
+- Communication assessment
+- Problem-solving assessment
+- Strengths
+- Weaknesses
+- Interview evidence
+- Improvement areas
+- Final summary
 
-Introduction / project icebreaker
-↓
-Behavioral / communication question
-↓
-Technical concept
-↓
-Practical implementation
-↓
-Debugging / scenario
-↓
-Follow-up / deeper question
-↓
-Final evaluation
+</details>
 
-The exact sequence is adaptive.
+---
 
-🎤 Voice Interview Architecture
+# 🧠 Adaptive Interview Engine
 
-The browser captures microphone audio and streams it to Deepgram through
-a WebSocket.
+The adaptive engine is one of the core parts of the project.
 
-Microphone
-↓
-MediaRecorder
-↓
-Audio chunks
-↓
-Deepgram WebSocket
-↓
-Interim / Final Transcript
-↓
-Editable Answer
-↓
-Submit
+It considers the current interview state when deciding what should happen next.
 
-The voice lifecycle explicitly handles:
+```text
+                  ┌───────────────────┐
+                  │ Interview Context │
+                  └─────────┬─────────┘
+                            ↓
+                 ┌─────────────────────┐
+                 │ Previous Questions  │
+                 │ Previous Answers    │
+                 │ Current Difficulty  │
+                 │ Topics Covered      │
+                 │ Role + Skills       │
+                 │ Project Context     │
+                 └─────────┬───────────┘
+                           ↓
+                  ┌─────────────────┐
+                  │ AI Decision     │
+                  │ Engine          │
+                  └────────┬────────┘
+                           ↓
+             ┌─────────────┼─────────────┐
+             ↓             ↓             ↓
+         New Topic      Follow-up    Difficulty
+                                      Adjustment
+             └─────────────┼─────────────┘
+                           ↓
+                    Next Question
+```
 
-AI SPEAKING
-↓
-MIC MUTED
-↓
-LISTENING
-↓
-CANDIDATE SPEAKING
-↓
-TRANSCRIPT
-↓
-SUBMIT
-↓
-PROCESSING
-↓
-NEXT QUESTION
+### Example
 
-While the interviewer speaks, the microphone track is muted to reduce
-AI-voice echo being captured as the candidate's answer.
+Suppose a candidate correctly explains `useState`.
 
-The implementation uses track-level muting rather than repeatedly
-pausing/resuming the recorder, helping preserve a continuous audio
-stream.
+The interviewer should not simply ask another identical definition question.
 
-Voice reliability
+It can move toward:
 
-The application includes:
+```text
+useState
+  ↓
+Rendering behavior
+  ↓
+List rendering
+  ↓
+Keys
+  ↓
+Performance / practical scenario
+```
 
-Temporary Deepgram tokens
+If the candidate struggles, the system can instead stay at a more accessible level and probe the same concept differently.
 
-Continuous KeepAlive heartbeat
+---
 
-WebSocket lifecycle management
+# 🎤 Voice Engine
 
-Reconnection with exponential backoff
+Voice interaction is implemented using **Deepgram Speech-to-Text** and browser speech synthesis.
 
-Microphone/recorder lifecycle checks
+```text
+                 CANDIDATE
+                     │
+                     ▼
+              🎙️ Microphone
+                     │
+                     ▼
+             Browser Recorder
+                     │
+                     ▼
+             Audio WebSocket
+                     │
+                     ▼
+                 Deepgram
+                     │
+                     ▼
+          Interim / Final Transcript
+                     │
+                     ▼
+             ✏️ Editable Text
+                     │
+                     ▼
+               Submit Answer
+                     │
+                     ▼
+                AI Evaluation
+```
 
-Transcript preservation during reconnects
+The AI interviewer speaks using the browser's `speechSynthesis` API.
 
-Duplicate socket protection
+---
 
-Duplicate submission protection
+## 🔄 Voice State Machine
 
-Speech-synthesis lifecycle protection
+The application explicitly manages the voice lifecycle.
 
-📊 Evaluation
+```text
+┌───────────────┐
+│ AI SPEAKING   │
+└───────┬───────┘
+        │
+        ▼
+┌────────────────────┐
+│ Microphone Muted   │
+└─────────┬──────────┘
+          │
+          ▼
+┌────────────────────┐
+│ Candidate Listening│
+└─────────┬──────────┘
+          │
+          ▼
+┌────────────────────┐
+│ Candidate Speaking │
+└─────────┬──────────┘
+          │
+          ▼
+┌────────────────────┐
+│ Live Transcription │
+└─────────┬──────────┘
+          │
+          ▼
+┌────────────────────┐
+│ Edit Transcript    │
+└─────────┬──────────┘
+          │
+          ▼
+┌────────────────────┐
+│ Submit Answer      │
+└─────────┬──────────┘
+          │
+          ▼
+┌────────────────────┐
+│ AI Evaluation      │
+└─────────┬──────────┘
+          │
+          ▼
+       Next Turn
+```
 
-The final evaluation is based on skills and topics actually assessed
-during the interview.
+---
 
-Example structure:
+# 🛡️ Voice Reliability
 
+Real-time voice introduces several problems that a normal form-based application does not have.
+
+The implementation specifically handles:
+
+<details>
+<summary><strong>⏱️ Deepgram inactivity</strong></summary>
+
+A continuous KeepAlive heartbeat is used while the WebSocket is open so that the connection does not unexpectedly disappear while the candidate is thinking, editing, or waiting for AI processing.
+
+</details>
+
+<details>
+<summary><strong>🔌 WebSocket reconnect</strong></summary>
+
+The application can reconnect after a connection failure using controlled retry/backoff behavior while preserving the candidate's transcript.
+
+</details>
+
+<details>
+<summary><strong>🎙️ Microphone lifecycle</strong></summary>
+
+Microphone and audio-track state are checked during reconnects instead of unnecessarily requesting microphone access again.
+
+</details>
+
+<details>
+<summary><strong>🔇 AI voice echo prevention</strong></summary>
+
+The microphone track is muted while the interviewer speaks, reducing the chance that the AI's own speech becomes the candidate's answer.
+
+</details>
+
+<details>
+<summary><strong>📦 Continuous recording</strong></summary>
+
+Track-level muting is preferred over repeatedly pausing and resuming the recorder, helping maintain a continuous audio stream.
+
+</details>
+
+<details>
+<summary><strong>🗣️ Speech synthesis lifecycle</strong></summary>
+
+The active speech utterance is retained and monitored so the UI does not become permanently stuck in an AI-speaking state.
+
+</details>
+
+---
+
+# ✏️ Editable Transcription
+
+The transcript is **not automatically treated as the final answer**.
+
+The flow is:
+
+```text
+Candidate speaks
+      ↓
+Deepgram transcript
+      ↓
+Candidate reviews it
+      ↓
+Candidate edits if necessary
+      ↓
+Candidate submits
+      ↓
+AI evaluates submitted answer
+```
+
+This is useful because speech-to-text can occasionally misunderstand technical terms, code names, or domain-specific vocabulary.
+
+It also prevents the system from submitting an answer before the candidate has had a chance to review it.
+
+---
+
+# 📊 Evaluation Engine
+
+The final evaluation is designed around **demonstrated evidence**, not just one arbitrary score.
+
+A result can contain:
+
+```json
 {
-"interviewId": "abc123",
-"skills": [
-{
-"skill": "JavaScript",
-"rating": 82,
-"level": "Strong",
-"strengths": [
-"Good understanding of asynchronous programming"
-],
-"weaknesses": [
-"Needs deeper understanding of event loop internals"
-],
-"evidence": [
-"Correctly explained Promise-based API handling",
-"Partially explained the event loop"
-]
+  "interviewId": "abc123",
+  "skills": [
+    {
+      "skill": "React",
+      "rating": 70,
+      "level": "Intermediate",
+      "strengths": ["Understands basic state management"],
+      "weaknesses": ["Needs deeper understanding of rendering behavior"],
+      "evidence": [
+        "Correctly explained useState",
+        "Needed additional guidance on list rendering"
+      ]
+    }
+  ],
+  "overallStrengths": [],
+  "overallWeaknesses": [],
+  "summary": "Candidate demonstrates an intermediate React foundation."
 }
-],
-"overallStrengths": [],
-"overallWeaknesses": [],
-"summary": "..."
-}
+```
 
-Evaluation principles
+## 🎯 Assessment Principles
 
-Only assess skills that were actually tested.
+<details open>
+<summary><strong>Only assess what was actually tested</strong></summary>
 
-Do not assign random scores to unassessed skills.
+A skill should not receive a demonstrated rating simply because it appeared in the candidate's profile.
 
-Keep self-assessment separate from demonstrated performance.
+</details>
 
-Support ratings with interview evidence.
+<details>
+<summary><strong>Separate self-assessment from demonstrated skill</strong></summary>
 
-Treat interview performance as the primary demonstrated-skill
-signal.
+The candidate may say:
 
-Use GitHub/project information as supporting context, not automatic
-proof of mastery.
+```text
+React → Advanced
+```
 
-🧩 Self-Assessed vs Demonstrated Level
+while the interview may demonstrate:
 
-The platform intentionally separates:
-
-Self-assessed level
-
+```text
 React → Intermediate
+```
 
-from:
+Both pieces of information remain useful.
 
-Demonstrated level
+</details>
 
-React → Intermediate
-Score → 70/100
+<details>
+<summary><strong>Use evidence</strong></summary>
 
-This allows the larger platform to identify gaps between what a
-candidate believes they know and what they demonstrate during an
-interview.
+A rating should be supported by observations from the interview rather than being an unexplained number.
 
-🛠️ Technology Stack
+</details>
 
-Frontend
+<details>
+<summary><strong>GitHub is supporting context</strong></summary>
 
-React 19
+Project/repository information can help generate relevant questions, but repository activity alone should not automatically be treated as proof of mastery.
 
-TypeScript
+</details>
 
-React Router
+---
 
-Tailwind CSS
+# 📈 Example Result
 
-Bun
+The result page can communicate the assessment at multiple levels.
 
-WebSocket
+```text
+┌───────────────────────────────────────────┐
+│        INTERVIEW EVALUATION REPORT        │
+├───────────────────────────────────────────┤
+│                                           │
+│ Overall Performance           60 / 100    │
+│                                           │
+│ Self-Assessed                 Intermediate│
+│ Demonstrated                  Intermediate│
+│                                           │
+├───────────────────────────────────────────┤
+│ Assessed Technical Skills                  │
+│                                           │
+│ React useState Hook             70 / 100  │
+│                                           │
+│ Strengths                                  │
+│ ✓ Understands basic state management     │
+│ ✓ Can explain basic hook usage           │
+│                                           │
+│ Areas to Improve                           │
+│ • Rendering behavior                     │
+│ • Deeper React internals                 │
+└───────────────────────────────────────────┘
+```
 
-MediaRecorder
+This makes the result more actionable than simply displaying:
 
-Browser Speech Synthesis
+```text
+Your score: 60
+```
 
-Backend
+---
 
-Bun
+# 🏗️ Architecture
 
-TypeScript
+```text
+                         ┌─────────────────────┐
+                         │   React Frontend    │
+                         │                     │
+                         │ Setup / Interview   │
+                         │ Transcript / Result │
+                         └──────────┬──────────┘
+                                    │
+                                    │ HTTP
+                                    ▼
+                         ┌─────────────────────┐
+                         │   Express Backend   │
+                         │                     │
+                         │ Interview State     │
+                         │ AI Decisions        │
+                         │ Evaluation          │
+                         │ Deepgram Token      │
+                         └───────┬───────┬─────┘
+                                 │       │
+                    ┌────────────┘       └──────────────┐
+                    ▼                                   ▼
+           ┌─────────────────┐                 ┌─────────────────┐
+           │   OmniRoute     │                 │    Deepgram     │
+           │                 │                 │                 │
+           │ LLM Gateway     │                 │ Speech-to-Text  │
+           └────────┬────────┘                 └─────────────────┘
+                    │
+                    ▼
+              ┌─────────────┐
+              │ LLM Model   │
+              └─────────────┘
 
-Express 5
+                    Backend
+                       │
+                       ▼
+                ┌────────────┐
+                │ PostgreSQL │
+                │ + Prisma   │
+                └────────────┘
+```
 
-Prisma
+---
 
-PostgreSQL
+# 🧩 Main Components
 
-AI / Voice
+<details>
+<summary><strong>Frontend — Interview.tsx</strong></summary>
 
-OmniRoute
+Handles the interactive interview experience, including question display, microphone state, transcript updates, voice states, submission, and interview progress.
 
-Configured LLM model through OmniRoute
+</details>
 
-Deepgram Speech-to-Text
+<details>
+<summary><strong>Frontend — Form.tsx</strong></summary>
 
-Browser Speech Synthesis
+Handles interview configuration such as role, company, level, and skill selection.
 
-Repository
+</details>
 
-Git
+<details>
+<summary><strong>Frontend — Result.tsx</strong></summary>
 
-GitHub
+Displays the final evaluation, assessed skills, evidence, strengths, weaknesses, and performance information.
 
-Turborepo
+</details>
 
-📁 Project Structure
+<details>
+<summary><strong>Backend — index.ts</strong></summary>
 
+Contains the primary interview API and interview lifecycle logic.
+
+</details>
+
+<details>
+<summary><strong>Backend — interview-prompts.ts</strong></summary>
+
+Centralizes the prompts and adaptive interview logic used to guide AI question generation and decisions.
+
+</details>
+
+<details>
+<summary><strong>Backend — result.ts</strong></summary>
+
+Handles final evaluation/result generation.
+
+</details>
+
+<details>
+<summary><strong>Backend — omniroute.ts</strong></summary>
+
+Provides the server-side interface to the configured OmniRoute LLM gateway.
+
+</details>
+
+<details>
+<summary><strong>Backend — scrapers/github.ts</strong></summary>
+
+Provides GitHub/project context used by the interview system.
+
+</details>
+
+<details>
+<summary><strong>Database — Prisma</strong></summary>
+
+Defines and persists interview-related data in PostgreSQL.
+
+</details>
+
+---
+
+# 🛠️ Technology Stack
+
+| Layer          | Technology               | Purpose                         |
+| -------------- | ------------------------ | ------------------------------- |
+| UI             | React 19                 | Interview interface             |
+| Language       | TypeScript               | Type-safe frontend/backend code |
+| Styling        | Tailwind CSS             | UI styling                      |
+| Runtime        | Bun                      | Development/runtime tooling     |
+| Backend        | Express 5                | API server                      |
+| AI Gateway     | OmniRoute                | LLM abstraction                 |
+| Speech-to-text | Deepgram                 | Real-time transcription         |
+| AI Voice       | Browser Speech Synthesis | Interviewer speech              |
+| Database       | PostgreSQL               | Persistent interview data       |
+| ORM            | Prisma                   | Database access/schema          |
+| Repository     | GitHub                   | Source control                  |
+| Workspace      | Turborepo                | Monorepo management             |
+
+---
+
+# 📁 Project Structure
+
+```text
 ai-interviewer/
 │
 ├── apps/
-│ ├── backend/
-│ │ ├── index.ts
-│ │ ├── omniroute.ts
-│ │ ├── result.ts
-│ │ ├── interview-prompts.ts
-│ │ ├── scrapers/
-│ │ │ └── github.ts
-│ │ └── prisma/
-│ │ ├── schema.prisma
-│ │ └── migrations/
-│ │
-│ └── frontend/
-│ └── src/
-│ ├── components/
-│ │ ├── Form.tsx
-│ │ ├── Interview.tsx
-│ │ └── Result.tsx
-│ └── lib/
-│ └── config.ts
+│   │
+│   ├── backend/
+│   │   ├── index.ts
+│   │   ├── omniroute.ts
+│   │   ├── result.ts
+│   │   ├── interview-prompts.ts
+│   │   │
+│   │   ├── scrapers/
+│   │   │   └── github.ts
+│   │   │
+│   │   └── prisma/
+│   │       ├── schema.prisma
+│   │       └── migrations/
+│   │
+│   └── frontend/
+│       └── src/
+│           ├── components/
+│           │   ├── Form.tsx
+│           │   ├── Interview.tsx
+│           │   └── Result.tsx
+│           │
+│           └── lib/
+│               └── config.ts
 │
 ├── package.json
 ├── turbo.json
 └── README.md
+```
 
-🚀 Getting Started
+---
 
-Prerequisites
+# 🚀 Setup
+
+## 1. Prerequisites
 
 Install:
 
-Git
-
-Bun
-
-PostgreSQL
-
-Deepgram API access
-
-OmniRoute / compatible LLM setup
+- Git
+- Bun
+- PostgreSQL
+- Deepgram API access
+- OmniRoute / compatible LLM setup
 
 Check Bun:
 
+```bash
 bun --version
+```
 
-Clone
+---
 
+## 2. Clone the repository
+
+```bash
 git clone https://github.com/ItsKartik12/ai-interviewer.git
 cd ai-interviewer
+```
 
-Install
+---
 
+## 3. Install dependencies
+
+```bash
 bun install
+```
 
-🔐 Environment Variables
+---
+
+## 4. Configure environment variables
 
 Create:
 
+```text
 apps/backend/.env
+```
 
 Typical configuration:
 
+```env
 PORT=3001
 FRONTEND_URL=http://localhost:3000
 
@@ -405,456 +804,544 @@ DEEPGRAM_API_KEY=your_deepgram_api_key
 OMNIROUTE_URL=http://localhost:20128
 OMNIROUTE_API_KEY=your_omniroute_api_key
 OMNIROUTE_MODEL=oc/big-pickle
+```
 
-Use the project's .env.example as the authoritative list of variables
-for the current implementation.
+> Use the repository's `.env.example` as the source of truth for the exact variables required by the current implementation.
 
-Never commit real secrets.
-
-🗄️ Database
-
-The project uses Prisma.
-
-From the backend directory:
-
-cd apps/backend
-bunx prisma generate
-bunx prisma migrate deploy
-
-If working with an existing database, do not reset it just to
-resolve migration issues. Preserve existing interview data and apply
-additive migrations carefully.
-
-🤖 OmniRoute
-
-OmniRoute acts as the LLM gateway between the backend and the configured
-model.
-
-Typical local address:
-
-http://localhost:20128
-
-The intended architecture is:
-
-Frontend → Backend → OmniRoute → LLM
-
-This keeps provider credentials server-side and makes the model layer
-easier to replace.
-
-▶️ Run Locally
-
-Terminal 1 --- OmniRoute
-
-omniroute serve --port 20128 --no-open --no-tray
-
-Terminal 2 --- Backend
-
-cd apps/backend
-bun run dev
-
-Backend:
-
-http://localhost:3001
-
-Terminal 3 --- Frontend
-
-cd apps/frontend
-bun run dev
-
-Frontend:
-
-http://localhost:3000
-
-If configured in the workspace, the complete development environment can
-also be started with:
-
-bun run dev
-
-🎮 Using the Application
-
-Open the frontend.
-
-Select the target role.
-
-Select or enter the target company.
-
-Select the candidate's current level.
-
-Select the primary skill.
-
-Review recommended role skills.
-
-Start the interview.
-
-Allow microphone access.
-
-Listen to the interviewer introduction.
-
-Answer using the microphone.
-
-Review/edit the generated transcript.
-
-Submit the answer.
-
-Continue through adaptive questions.
-
-End the interview.
-
-Review the final evaluation report.
-
-🧪 Testing
-
-Frontend TypeScript
-
-npx tsc --project apps/frontend/tsconfig.json --noEmit
-
-Backend TypeScript
-
-npx tsc --project apps/backend/tsconfig.json --noEmit
-
-Production build
-
-bun run --cwd apps/frontend build.ts
-
-API lifecycle
-
-A useful end-to-end test should verify:
-
-Role Analysis
-↓
-Interview Creation
-↓
-Turn 1
-↓
-Turn 2
-↓
-Adaptive Turns
-↓
-Final Evaluation
-
-Manual voice test
-
-Real Chrome testing is recommended because automated browser
-environments may not provide a reliable physical microphone.
-
-Verify:
-
-Microphone permission
-
-Microphone ready state
-
-Deepgram connection
-
-AI speaking state
-
-Microphone muted while AI speaks
-
-Live transcription
-
-Transcript editing
-
-Submission
-
-Adaptive next question
-
-Reconnection behavior
-
-Final evaluation
-
-🔒 Security
-
-Permanent credentials must remain server-side.
-
-Never expose:
-
-DEEPGRAM_API_KEY
-OMNIROUTE_API_KEY
-
-The frontend should receive only temporary/limited credentials where
-required, such as a temporary Deepgram token.
+### ⚠️ Never commit secrets
 
 Do not commit:
 
+```text
 .env
+```
 
-Use .env.example for documenting required configuration.
+Use:
 
-🏗️ Architecture Principles
+```text
+.env.example
+```
 
-AI Interviewer = Assessment Engine
+for safe configuration documentation.
 
-The module focuses on:
+---
 
-Interviewing
+# 🗄️ Database Setup
 
-Question generation
+The project uses Prisma with PostgreSQL.
 
-Adaptation
+From the backend directory:
 
-Skill assessment
+```bash
+cd apps/backend
+bunx prisma generate
+bunx prisma migrate deploy
+```
 
-Evidence-backed evaluation
+If working with an existing database, **do not reset the database just to solve a migration problem**. Preserve existing interview data and apply additive migrations carefully.
 
-Main SIH Platform = Candidate System of Record
+---
 
-When integrated, the main platform should own:
+# 🤖 OmniRoute Setup
 
-Candidate identity
+OmniRoute acts as the LLM gateway.
 
-Master skill profile
+Typical local address:
 
-Job/opportunity matching
+```text
+http://localhost:20128
+```
 
-Learning recommendations
+Start it with the configuration used by your environment.
 
-Long-term progress
+Example:
 
-The intended boundary is:
+```bash
+omniroute serve --port 20128 --no-open --no-tray
+```
 
-AI Interviewer
-↓
-Structured Assessment
-↓
-SIH Backend
+The intended architecture is:
 
-The SIH backend should not need to know Deepgram or OmniRoute
-implementation details.
+```text
+Frontend
+   ↓
+Backend
+   ↓
+OmniRoute
+   ↓
+LLM
+```
 
-🌐 Integration Vision
+This prevents permanent LLM credentials from being exposed in the browser and allows the underlying model/provider to be changed more easily.
 
-                 ┌─────────────────────┐
-                 │    Main SIH App     │
-                 └──────────┬──────────┘
-                            │
-                     Candidate Profile
-                            │
-          ┌─────────────────┼─────────────────┐
-          │                 │                 │
-          ▼                 ▼                 ▼
-     Job Matching      Learning Engine   AI Interviewer
-                                            │
-                                            ▼
-                                      Skill Assessment
-                                            │
-                                            ▼
-                                      Main SIH App
+---
 
-A future assessment payload can contain:
+# ▶️ Run the Project
 
+### Terminal 1 — OmniRoute
+
+```bash
+omniroute serve --port 20128 --no-open --no-tray
+```
+
+### Terminal 2 — Backend
+
+```bash
+cd apps/backend
+bun run dev
+```
+
+Backend:
+
+```text
+http://localhost:3001
+```
+
+### Terminal 3 — Frontend
+
+```bash
+cd apps/frontend
+bun run dev
+```
+
+Frontend:
+
+```text
+http://localhost:3000
+```
+
+If the root workspace is configured accordingly:
+
+```bash
+bun run dev
+```
+
+can start the development workspace together.
+
+---
+
+# 🧪 Testing & Verification
+
+## TypeScript
+
+Frontend:
+
+```bash
+npx tsc --project apps/frontend/tsconfig.json --noEmit
+```
+
+Backend:
+
+```bash
+npx tsc --project apps/backend/tsconfig.json --noEmit
+```
+
+## Production build
+
+```bash
+bun run --cwd apps/frontend build.ts
+```
+
+## API lifecycle
+
+A complete API test should verify:
+
+```text
+Role Analysis
+     ↓
+Interview Creation
+     ↓
+Turn 1
+     ↓
+Turn 2
+     ↓
+Adaptive Turns
+     ↓
+Final Evaluation
+```
+
+## Manual voice verification
+
+Real Chrome testing is recommended for microphone functionality.
+
+Verify:
+
+- Microphone permission
+- Microphone ready state
+- Deepgram connection
+- AI speaking state
+- Mic muting while AI speaks
+- Live transcription
+- Transcript editing
+- Answer submission
+- Adaptive next question
+- Reconnection
+- Final evaluation
+
+---
+
+# 🔐 Security Model
+
+The project intentionally keeps permanent credentials on the backend.
+
+```text
+             Browser
+                │
+                │ temporary credential where required
+                ▼
+             Backend
+             /     \
+            /       \
+           ▼         ▼
+      Deepgram    OmniRoute
+```
+
+The frontend should **never** receive:
+
+```text
+DEEPGRAM_API_KEY
+OMNIROUTE_API_KEY
+```
+
+The backend should control access to external providers.
+
+---
+
+# 🔌 Integration with the Main SIH Platform
+
+AI Interviewer is designed to become a module inside a larger candidate-development platform.
+
+The separation is intentional.
+
+### AI Interviewer owns
+
+- Interview execution
+- Question generation
+- Adaptive difficulty
+- Voice interaction
+- Answer analysis
+- Skill assessment
+- Evidence generation
+
+### Main SIH Platform owns
+
+- Candidate identity
+- Master candidate profile
+- Job/opportunity matching
+- Learning recommendations
+- Long-term skill progress
+
+The integration should look like:
+
+```text
+                  MAIN SIH PLATFORM
+                         │
+                         │ candidate context
+                         ▼
+                 ┌───────────────┐
+                 │ AI Interviewer│
+                 └───────┬───────┘
+                         │
+                  Interview Session
+                         │
+                         ▼
+                 Structured Assessment
+                         │
+                         ▼
+                  MAIN SIH PLATFORM
+                         │
+              ┌──────────┼──────────┐
+              ▼          ▼          ▼
+         Skill Gap    Job Match   Learning
+         Analysis                 Plan
+```
+
+---
+
+# 📦 Future Assessment Contract
+
+A clean integration payload can look like:
+
+```json
 {
-"interviewId": "abc123",
-"candidateId": "candidate_123",
-"role": "Frontend Engineer",
-"company": "Google",
-"skills": [
-{
-"skill": "React",
-"rating": 70,
-"level": "Intermediate",
-"strengths": [],
-"weaknesses": [],
-"evidence": []
+  "interviewId": "abc123",
+  "candidateId": "candidate_123",
+  "role": "Frontend Engineer",
+  "company": "Google",
+  "skills": [
+    {
+      "skill": "React",
+      "rating": 70,
+      "level": "Intermediate",
+      "strengths": ["Understands basic state management"],
+      "weaknesses": ["Needs deeper understanding of rendering behavior"],
+      "evidence": [
+        "Correctly explained useState",
+        "Needed additional guidance on list rendering"
+      ]
+    }
+  ],
+  "overallStrengths": [],
+  "overallWeaknesses": [],
+  "summary": "Candidate demonstrates an intermediate React foundation."
 }
-],
-"overallStrengths": [],
-"overallWeaknesses": [],
-"summary": "..."
-}
+```
 
-This can later power:
+The exact schema can be finalized when the main SIH backend integration begins.
 
-Skill-gap detection
+---
 
-Job matching
+# 🔬 Design Decisions
 
-Personalized learning paths
+<details>
+<summary><strong>Why adaptive questions?</strong></summary>
 
-Interview readiness
+A candidate's previous answer contains information about their knowledge. Using that information makes the next question more useful than blindly following a predefined list.
 
-Candidate progress tracking
+</details>
 
-Recommendation systems
+<details>
+<summary><strong>Why editable transcripts?</strong></summary>
 
-🎨 Result Dashboard
+Technical speech-to-text can occasionally misinterpret framework names, APIs, code terms, or acronyms. Allowing candidates to correct the transcript gives the evaluation engine a cleaner representation of the intended answer.
 
-The evaluation UI presents information such as:
+</details>
 
-Overall score
+<details>
+<summary><strong>Why browser Speech Synthesis?</strong></summary>
 
-Performance tier
+It provides a simple voice layer for the MVP without adding another paid/external TTS dependency.
 
-Self-assessed level
+</details>
 
-Demonstrated level
+<details>
+<summary><strong>Why Deepgram WebSocket?</strong></summary>
 
-Assessed technical skills
+The interview requires streaming transcription rather than waiting for the candidate to upload a completed recording.
 
-Skill-specific strengths
+</details>
 
-Weaknesses
+<details>
+<summary><strong>Why separate self-assessment and demonstrated assessment?</strong></summary>
 
-Evidence from the interview
+A candidate's perception of their ability and their demonstrated ability are different signals. Keeping both allows the larger platform to identify possible skill gaps.
 
-Communication assessment
+</details>
 
-Problem-solving assessment
+<details>
+<summary><strong>Why structured results?</strong></summary>
 
-Final summary
+A score alone is difficult for another system to use. Skill-level evidence, strengths, weaknesses, and improvement areas can directly feed future recommendation and matching systems.
 
-The goal is to make the result useful beyond simply showing a single
-score.
+</details>
 
-🚧 Current Limitations
+---
 
-The project is still evolving. Potential improvements include:
+# 🎨 User Experience
 
-More verified public company context
+The interface is organized around clear interview states.
 
-Stronger resume parsing
+```text
+┌─────────────────────────────────────────┐
+│             INTERVIEW SETUP             │
+└─────────────────┬───────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│           ROLE SKILL REVIEW             │
+└─────────────────┬───────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│          INTERVIEWER INTRO              │
+└─────────────────┬───────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│            LIVE INTERVIEW               │
+│                                         │
+│  Question         Voice Orb             │
+│  Transcript       Mic State             │
+│  Progress         Submit                │
+└─────────────────┬───────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│          EVALUATION REPORT              │
+│                                         │
+│  Score • Skills • Evidence • Gaps      │
+└─────────────────────────────────────────┘
+```
 
-Additional voice providers
+---
 
-Advanced speech analytics
+# 📱 Responsive & Accessibility Goals
 
-Filler-word and speaking-pattern analysis
+The interview interface is designed to keep the most important actions visible:
 
-More sophisticated skill calibration
+- Current question
+- Voice state
+- Transcript
+- Submit action
+- Interview progress
+- Reconnection state
+- Evaluation result
 
-Multi-interview candidate history
+The application also exposes explicit voice states rather than silently failing.
 
-Interview progress comparison
+Examples:
+
+```text
+MIC READY
+CONNECTED
+LISTENING
+AI SPEAKING
+MIC MUTED
+PROCESSING
+RECONNECTING
+ERROR
+```
+
+---
+
+# 🚧 Current Limitations
+
+The project is actively evolving.
+
+Current/future improvement areas include:
+
+- More verified public company context
+- Stronger resume parsing
+- Additional voice providers
+- Advanced speech analytics
+- Filler-word analysis
+- Speaking-pattern analysis
+- More sophisticated skill calibration
+- Multi-interview candidate history
+- Interview comparison over time
+- Human interviewer review
+- Production monitoring
+- Production deployment
+- Main-platform authentication integration
+- Full SIH backend integration
+
+Company-specific interview content should rely on reliable public information and should never claim access to confidential interview questions.
+
+---
 
-Human interviewer review
+# 🛣️ Roadmap
 
-Production monitoring and observability
+<details open>
+<summary><strong>Phase 1 — Core Interview Engine</strong></summary>
 
-Authentication owned by the main platform
+- [x] Interview setup
+- [x] Role/company/level context
+- [x] Skill analysis
+- [x] Adaptive questions
+- [x] Difficulty adjustment
+- [x] Follow-up questions
+- [x] Question repetition avoidance
+- [x] GitHub/project-aware context
 
-Deeper SIH backend integration
+</details>
 
-Company-specific interview content should use reliable public
-information and must not claim access to confidential interview
-questions.
+<details open>
+<summary><strong>Phase 2 — Voice Interview</strong></summary>
 
-🛣️ Roadmap
+- [x] Microphone capture
+- [x] Deepgram streaming transcription
+- [x] Editable transcript
+- [x] AI speech
+- [x] Mic muting during AI speech
+- [x] KeepAlive handling
+- [x] Reconnection handling
+- [x] Voice lifecycle cleanup
 
-Core Interview Engine
+</details>
 
-Interview setup
+<details open>
+<summary><strong>Phase 3 — Evaluation</strong></summary>
 
-Role/company/level context
+- [x] Final AI evaluation
+- [x] Technical skill scoring
+- [x] Communication assessment
+- [x] Problem-solving assessment
+- [x] Evidence-backed strengths
+- [x] Evidence-backed weaknesses
+- [x] Result dashboard
+- [x] Self vs demonstrated level
 
-Skill analysis
+</details>
 
-Adaptive questions
+<details>
+<summary><strong>Phase 4 — SIH Integration</strong></summary>
 
-Difficulty adjustment
+- [ ] Finalize assessment API contract
+- [ ] Connect candidate identity
+- [ ] Send structured skill assessment
+- [ ] Consume assessment in SIH backend
+- [ ] Skill-gap analysis
+- [ ] Learning recommendations
+- [ ] Job/opportunity matching
+- [ ] Long-term candidate skill history
 
-Follow-up questions
+</details>
 
-Repetition avoidance
+<details>
+<summary><strong>Phase 5 — Production</strong></summary>
 
-Voice
+- [ ] Production deployment
+- [ ] Secure secret management
+- [ ] Monitoring
+- [ ] Rate limiting
+- [ ] Error tracking
+- [ ] Production database
+- [ ] Performance optimization
+- [ ] Final hackathon demo flow
 
-Microphone capture
+</details>
 
-Deepgram transcription
+---
 
-Editable transcript
+# 🤝 Contributing
 
-AI speech
+Contributions should preserve the core interview experience.
 
-Mic muting during AI speech
+Before submitting a change:
 
-KeepAlive
+1. Keep API keys and secrets out of source control.
+2. Avoid breaking the voice lifecycle.
+3. Avoid unnecessary dependencies.
+4. Keep evaluation evidence-based.
+5. Validate external inputs.
+6. Run frontend and backend checks.
+7. Test important voice changes manually in Chrome.
+8. Document major architectural changes.
 
-Reconnection handling
+---
 
-Voice lifecycle cleanup
+# 📜 License
 
-Evaluation
+A project-specific license should be added before public distribution.
 
-Final AI evaluation
+Also verify the licenses of third-party libraries, tutorials, reference implementations, and copied code used in the project.
 
-Technical skill scoring
+---
 
-Communication assessment
+# 👨‍💻 Project
 
-Problem-solving assessment
+<div align="center">
 
-Evidence-backed strengths
+### AI Interviewer
 
-Evidence-backed weaknesses
+**Adaptive AI Interviewing + Voice Interaction + Skill Assessment**
 
-Result dashboard
+Built for a larger SIH-oriented candidate development platform.
 
-SIH Integration
+<br>
 
-Finalize integration contract
+<a href="https://github.com/ItsKartik12/ai-interviewer">
+  <img src="https://img.shields.io/badge/View%20Repository-GitHub-181717?style=for-the-badge&logo=github" alt="View Repository">
+</a>
 
-Connect candidate identity
+<br><br>
 
-Send structured skill assessment
+**Built with React • TypeScript • Bun • Express • Deepgram • OmniRoute • Prisma • PostgreSQL**
 
-Consume assessment in SIH backend
-
-Generate skill-gap analysis
-
-Connect learning recommendations
-
-Connect job/opportunity matching
-
-Production
-
-Production deployment
-
-Secure secret management
-
-Monitoring
-
-Rate limiting
-
-Error tracking
-
-Production database
-
-Performance optimization
-
-Final hackathon demo
-
-🤝 Contributing
-
-When contributing:
-
-Preserve the existing interview flow.
-
-Never expose secrets.
-
-Validate external input.
-
-Avoid breaking voice lifecycle handling.
-
-Keep evaluation evidence-based.
-
-Avoid unnecessary dependencies.
-
-Run frontend and backend checks after significant changes.
-
-Document major architectural changes.
-
-📜 License
-
-Add the intended project license before public distribution.
-
-Also verify the licenses of third-party libraries, tutorials, reference
-implementations, and copied code used in the project.
-
-👨‍💻 Project
-
-AI Interviewer
-
-Repository: https://github.com/ItsKartik12/ai-interviewer
-
-Built as an adaptive AI interview and skill-assessment system with a
-focus on realistic voice interviews, evidence-backed evaluation, and
-future integration with a larger candidate-development platform.
+</div>
