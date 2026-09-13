@@ -6,4 +6,6 @@ export const PreInterviewBody = z.object({
   level: z.enum(["Beginner", "Intermediate", "Advanced"]),
   company: z.string().trim().min(1, "Target company is required"),
   role: z.string().trim().min(1, "Target role is required"),
+  roleSkills: z.any().optional(),
 });
+

@@ -17,6 +17,7 @@ import {
   buildInterviewSystemPrompt,
   buildTurnInstruction,
   coveredTopics,
+  generateRoleSkills,
   parseInterviewDecision,
   questionCount,
 } from "./interview-prompts.ts";
@@ -70,6 +71,41 @@ app.get(
 );
 
 // --------------------------------------------------
+// ANALYZE ROLE SKILLS
+// --------------------------------------------------
+
+app.post("/api/v1/analyze-role", async (req, res) => {
+  try {
+    const { role, company, level, skill, context } = req.body ?? {};
+
+    if (!role || typeof role !== "string") {
+      res.status(400).json({
+        error: "Target role is required",
+      });
+      return;
+    }
+
+    const roleSkills = await generateRoleSkills({
+      role: String(role).trim(),
+      company: company ? String(company).trim() : undefined,
+      level: level ? String(level).trim() : undefined,
+      skill: skill ? String(skill).trim() : undefined,
+      context: context ? String(context).trim() : undefined,
+    });
+
+    res.json({
+      roleSkills,
+    });
+  } catch (error) {
+    console.error("Analyze role error:", error);
+
+    res.status(500).json({
+      error: "Failed to analyze role skills",
+    });
+  }
+});
+
+// --------------------------------------------------
 // CREATE PRE-INTERVIEW
 // --------------------------------------------------
 
@@ -119,6 +155,17 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       },
     });
 
+    // Ensure role skills are determined and attached
+    let roleSkills = data.roleSkills;
+    if (!roleSkills || !Array.isArray(roleSkills.technicalSkills) || roleSkills.technicalSkills.length === 0) {
+      roleSkills = await generateRoleSkills({
+        role: data.role,
+        company: data.company,
+        level: data.level,
+        skill: data.skill,
+      });
+    }
+
     const interview = await prisma.interview.create({
       data: {
         userId: user.uid,
@@ -131,6 +178,7 @@ app.post("/api/v1/pre-interview", async (req, res) => {
         targetRole: data.role,
         duration: 30,
         githubMetadata: githubData,
+        jobDescription: JSON.stringify(roleSkills),
         status: "Pre",
       },
     });
@@ -139,6 +187,7 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 
     res.json({
       id: interview.id,
+      roleSkills,
     });
   } catch (error) {
     console.error("Pre-interview error:", error);
@@ -171,7 +220,7 @@ app.post("/api/v1/deepgram-token", async (_req, res) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        ttl_seconds: 60,
+        ttl_seconds: 600,
       }),
     });
 
@@ -259,6 +308,8 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
         targetRole: interview.targetRole,
         targetCompany: interview.targetCompany,
         selfAssessedLevel: interview.selfAssessedLevel,
+        questionType: "introduction",
+        skillAssessed: "Background & Communication",
       });
 
       return;
@@ -281,7 +332,12 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       },
       {
         role: "user",
-        content: buildTurnInstruction({ messages: [], firstTurn: true }),
+        content: buildTurnInstruction({
+          messages: [],
+          firstTurn: true,
+          targetRole: interview.targetRole ?? undefined,
+          targetCompany: interview.targetCompany ?? undefined,
+        }),
       },
     ]);
 
@@ -314,6 +370,8 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       targetRole: interview.targetRole,
       targetCompany: interview.targetCompany,
       selfAssessedLevel: interview.selfAssessedLevel,
+      questionType: decision.questionType,
+      skillAssessed: decision.skillAssessed,
     });
   } catch (error) {
     console.error("Interview start error:", error);
@@ -431,6 +489,8 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       topic: decision.topic,
       followUp: decision.followUp,
       finished: decision.finished,
+      questionType: decision.questionType,
+      skillAssessed: decision.skillAssessed,
     });
   } catch (error) {
     console.error("Interview response error:", error);
@@ -469,10 +529,25 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     let feedback = interview.feedback;
     let status = interview.status;
 
+    let roleSkills = null;
+    if (interview.jobDescription) {
+      try {
+        roleSkills = JSON.parse(interview.jobDescription);
+      } catch {
+        roleSkills = null;
+      }
+    }
+
     if (interview.status !== "Done") {
       const result = await calculateResult(
         interview.conversations,
         interview.githubMetadata,
+        {
+          role: interview.targetRole,
+          company: interview.targetCompany,
+          targetSkill: interview.targetSkill,
+          selfAssessedLevel: interview.selfAssessedLevel,
+        },
       );
 
       const updatedInterview = await prisma.interview.update({
@@ -500,6 +575,11 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
         feedback,
         status,
         evaluation: result,
+        targetSkill: interview.targetSkill,
+        targetRole: interview.targetRole,
+        targetCompany: interview.targetCompany,
+        selfAssessedLevel: interview.selfAssessedLevel,
+        roleSkills,
         transcript: interview.conversations.map((conversation) => ({
           type: conversation.type,
           content: conversation.message,
@@ -518,6 +598,7 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
       targetRole: interview.targetRole,
       targetCompany: interview.targetCompany,
       selfAssessedLevel: interview.selfAssessedLevel,
+      roleSkills,
 
       transcript: interview.conversations.map((conversation) => ({
         type: conversation.type,
