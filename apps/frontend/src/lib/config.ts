@@ -13,3 +13,12 @@ function readPublicEnv(name: string): string | undefined {
 export const BACKEND_URL = (
   readPublicEnv("PUBLIC_BACKEND_URL") ?? "http://localhost:3001"
 ).replace(/\/$/, "");
+
+/**
+ * Destination for Return to Login / Back to Login.
+ * Defaults to the parent InternSetu platform login route, or configured URL.
+ */
+export const LOGIN_URL =
+  readPublicEnv("PUBLIC_LOGIN_URL") ??
+  readPublicEnv("PUBLIC_INTERNSETU_URL") ??
+  "https://internsheu.vercel.app/login";

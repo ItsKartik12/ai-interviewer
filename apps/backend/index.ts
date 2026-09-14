@@ -17,10 +17,13 @@ import {
   buildInterviewSystemPrompt,
   buildTurnInstruction,
   coveredTopics,
+  determineInterviewStage,
   generateRoleSkills,
   parseInterviewDecision,
   questionCount,
+  type RoleSkillRequirement,
 } from "./interview-prompts.ts";
+import { integrationRouter } from "./routes/integration.ts";
 
 const app = express();
 
@@ -52,6 +55,7 @@ app.use(
 
 app.use(globalRateLimit);
 app.use(healthRouter);
+app.use(integrationRouter);
 
 // --------------------------------------------------
 // AUTH
@@ -315,6 +319,17 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       return;
     }
 
+    let roleSkills: RoleSkillRequirement | null = null;
+    if (interview.jobDescription) {
+      try {
+        roleSkills = JSON.parse(interview.jobDescription);
+      } catch {
+        roleSkills = null;
+      }
+    }
+
+    const stage = determineInterviewStage(0);
+
     const aiResponse = await askOmniRoute([
       {
         role: "system",
@@ -325,10 +340,12 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           selfAssessedLevel: interview.selfAssessedLevel,
           targetCompany: interview.targetCompany,
           targetRole: interview.targetRole,
+          roleSkills,
           questionCount: 0,
           coveredTopics: [],
           durationMinutes: interview.duration,
           previousQuestions: [],
+          currentStage: stage,
         }),
       },
       {
@@ -338,6 +355,7 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           firstTurn: true,
           targetRole: interview.targetRole ?? undefined,
           targetCompany: interview.targetCompany ?? undefined,
+          currentStage: stage,
         }),
       },
     ]);
@@ -346,7 +364,7 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       throw new Error("OmniRoute returned an empty response");
     }
 
-    const decision = parseInterviewDecision(aiResponse, interview.difficulty);
+    const decision = parseInterviewDecision(aiResponse, interview.difficulty, stage);
 
     await prisma.message.create({
       data: {
@@ -373,6 +391,8 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       selfAssessedLevel: interview.selfAssessedLevel,
       questionType: decision.questionType,
       skillAssessed: decision.skillAssessed,
+      stage: decision.stage || stage,
+      answerQuality: decision.answerQuality,
     });
   } catch (error) {
     console.error("Interview start error:", error);
@@ -437,6 +457,18 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       content: message,
     });
 
+    let roleSkills: RoleSkillRequirement | null = null;
+    if (interview.jobDescription) {
+      try {
+        roleSkills = JSON.parse(interview.jobDescription);
+      } catch {
+        roleSkills = null;
+      }
+    }
+
+    const currentQuestionCount = questionCount(interview.conversations);
+    const stage = determineInterviewStage(currentQuestionCount);
+
     const aiResponse = await askOmniRoute([
       {
         role: "system",
@@ -447,12 +479,14 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
           selfAssessedLevel: interview.selfAssessedLevel,
           targetCompany: interview.targetCompany,
           targetRole: interview.targetRole,
-          questionCount: questionCount(interview.conversations),
+          roleSkills,
+          questionCount: currentQuestionCount,
           coveredTopics: coveredTopics(interview.conversations),
           durationMinutes: interview.duration,
           previousQuestions: interview.conversations
             .filter((item) => item.type === "Assistant")
             .map((item) => item.message),
+          currentStage: stage,
         }),
       },
       {
@@ -460,6 +494,7 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
         content: buildTurnInstruction({
           messages: interview.conversations,
           latestAnswer: message,
+          currentStage: stage,
         }),
       },
     ]);
@@ -468,7 +503,7 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       throw new Error("OmniRoute returned an empty response");
     }
 
-    const decision = parseInterviewDecision(aiResponse, interview.difficulty);
+    const decision = parseInterviewDecision(aiResponse, interview.difficulty, stage);
 
     // Save AI response
     await prisma.message.create({
@@ -495,6 +530,8 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       finished: decision.finished,
       questionType: decision.questionType,
       skillAssessed: decision.skillAssessed,
+      stage: decision.stage || stage,
+      answerQuality: decision.answerQuality,
     });
   } catch (error) {
     console.error("Interview response error:", error);
@@ -551,6 +588,7 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
           company: interview.targetCompany,
           targetSkill: interview.targetSkill,
           selfAssessedLevel: interview.selfAssessedLevel,
+          roleSkills,
         },
       );
 

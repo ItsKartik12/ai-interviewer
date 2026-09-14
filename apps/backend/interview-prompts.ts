@@ -34,7 +34,25 @@ export type QuestionType =
   | "scenario"
   | "architecture"
   | "trade-off"
-  | "follow-up";
+  | "follow-up"
+  | "wrap-up";
+
+export type InterviewStage =
+  | "stage_1_introduction"
+  | "stage_2_behavioral"
+  | "stage_3_project_deep_dive"
+  | "stage_4_github_tech"
+  | "stage_5_core_skills"
+  | "stage_6_scenarios_debugging"
+  | "stage_7_wrap_up";
+
+export type AnswerQuality =
+  | "strong"
+  | "shallow"
+  | "vague"
+  | "partial"
+  | "incorrect"
+  | "initial_greeting";
 
 export type InterviewDecision = {
   question: string;
@@ -44,22 +62,32 @@ export type InterviewDecision = {
   skillAssessed: string;
   followUp: boolean;
   finished: boolean;
+  stage?: InterviewStage;
+  answerQuality?: AnswerQuality;
+  interviewerBridge?: string;
 };
 
-const TOPICS = [
-  "Programming",
-  "Data Structures & Algorithms",
-  "OOP",
-  "Databases",
-  "APIs",
-  "Web Development",
-  "Backend",
-  "Software Engineering",
-] as const;
+const VALID_QUESTION_TYPES: QuestionType[] = [
+  "introduction",
+  "behavioral",
+  "conceptual",
+  "practical",
+  "debugging",
+  "scenario",
+  "architecture",
+  "trade-off",
+  "follow-up",
+  "wrap-up",
+];
 
 function asGithubContext(githubMetadata: unknown): string {
   if (!githubMetadata || typeof githubMetadata !== "object") {
-    return "No GitHub information is available.";
+    return "No verified GitHub information is available. Ask the candidate directly about their personal projects.";
+  }
+
+  const meta = githubMetadata as Record<string, unknown>;
+  if (meta.summary && typeof meta.summary === "string") {
+    return meta.summary;
   }
 
   return JSON.stringify(githubMetadata);
@@ -76,31 +104,45 @@ function normalizeDifficulty(
   ) {
     return value;
   }
-
   return fallback;
 }
 
 function normalizeQuestionType(value: unknown): QuestionType {
-  const valid: QuestionType[] = [
-    "introduction",
-    "behavioral",
-    "conceptual",
-    "practical",
-    "debugging",
-    "scenario",
-    "architecture",
-    "trade-off",
-    "follow-up",
-  ];
-  if (typeof value === "string" && valid.includes(value as QuestionType)) {
+  if (typeof value === "string" && VALID_QUESTION_TYPES.includes(value as QuestionType)) {
     return value as QuestionType;
   }
   return "conceptual";
 }
 
+/**
+ * Determine the interview stage based on conversation progress and turn history.
+ */
+export function determineInterviewStage(
+  questionCount: number,
+  lastQuestionType?: QuestionType,
+  lastAnswerQuality?: AnswerQuality,
+): InterviewStage {
+  if (questionCount === 0) return "stage_1_introduction";
+  if (questionCount === 1) return "stage_2_behavioral";
+  if (questionCount === 2) return "stage_3_project_deep_dive";
+
+  // If candidate gave a shallow answer in project stage, stay for deep dive
+  if (questionCount === 3) {
+    return lastAnswerQuality === "shallow" || lastAnswerQuality === "vague"
+      ? "stage_3_project_deep_dive"
+      : "stage_4_github_tech";
+  }
+
+  if (questionCount === 4) return "stage_5_core_skills";
+  if (questionCount === 5) return "stage_5_core_skills";
+  if (questionCount === 6) return "stage_6_scenarios_debugging";
+  return "stage_7_wrap_up";
+}
+
 export function parseInterviewDecision(
   response: string,
   fallbackDifficulty: InterviewDifficulty,
+  currentStage?: InterviewStage,
 ): InterviewDecision {
   const candidate = response
     .replace(/^```(?:json)?\s*/i, "")
@@ -113,13 +155,21 @@ export function parseInterviewDecision(
       typeof parsed.question === "string" ? parsed.question.trim() : "";
 
     if (question) {
+      const parsedQuality = parsed.answerQuality || parsed.answerAssessment;
+      let quality: AnswerQuality = "strong";
+      if (typeof parsedQuality === "string") {
+        quality = parsedQuality as AnswerQuality;
+      } else if (parsedQuality && typeof (parsedQuality as any).quality === "string") {
+        quality = (parsedQuality as any).quality as AnswerQuality;
+      }
+
       return {
         question,
         difficulty: normalizeDifficulty(parsed.difficulty, fallbackDifficulty),
         topic:
           typeof parsed.topic === "string" && parsed.topic.trim()
             ? parsed.topic.trim()
-            : "Programming",
+            : "Engineering",
         questionType: normalizeQuestionType(parsed.questionType),
         skillAssessed:
           typeof parsed.skillAssessed === "string" && parsed.skillAssessed.trim()
@@ -127,20 +177,23 @@ export function parseInterviewDecision(
             : "Software Engineering",
         followUp: parsed.followUp === true,
         finished: parsed.finished === true,
+        stage: (parsed.stage as InterviewStage) || currentStage,
+        answerQuality: quality,
       };
     }
   } catch {
-    // Preserve compatibility with plain-text response
+    // Plain-text response fallback
   }
 
   return {
     question: response.trim(),
     difficulty: fallbackDifficulty,
-    topic: "Programming",
+    topic: "Engineering",
     questionType: "conceptual",
     skillAssessed: "Software Engineering",
     followUp: false,
     finished: false,
+    stage: currentStage,
   };
 }
 
@@ -158,15 +211,15 @@ function getHeuristicSkills(role: string, level: string): RoleSkillRequirement {
       company: "Target Company",
       level,
       technicalSkills: [
-        { skill: "JavaScript & TypeScript", importance: "high", reason: "Foundational web language and type safety" },
-        { skill: "React Architecture", importance: "high", reason: "Component lifecycle, state management, and hooks" },
-        { skill: "Web Performance & Optimization", importance: isSenior ? "high" : "medium", reason: "Core Web Vitals, asset bundling, and rendering performance" },
-        { skill: "CSS & Responsive UI", importance: "medium", reason: "Translating mockups to resilient responsive layouts" },
+        { skill: "JavaScript Fundamentals & Event Loop", importance: "high", reason: "Foundational runtime, closures, and async flow" },
+        { skill: "React Architecture & Lifecycle", importance: "high", reason: "Component reconciliation, state management, and re-renders" },
+        { skill: "Web Performance & Optimization", importance: isSenior ? "high" : "medium", reason: "Core Web Vitals, memory management, and bundle efficiency" },
+        { skill: "CSS & Responsive UI", importance: "medium", reason: "Resilient responsive layouts and modern styling" },
       ],
       softSkills: [
-        { skill: "Technical Communication", importance: "high", reason: "Articulating component design and trade-offs" },
-        { skill: "Problem Solving", importance: "high", reason: "Debugging browser quirks and async state issues" },
-        { skill: isSenior ? "Technical Mentorship & Review" : "Learning Agility", importance: "medium", reason: isSenior ? "Guiding code quality and team standards" : "Rapidly adopting evolving libraries" },
+        { skill: "Technical Communication", importance: "high", reason: "Articulating component design and trade-offs clearly" },
+        { skill: "Structured Problem Solving", importance: "high", reason: "Methodically troubleshooting async state issues and browser edge cases" },
+        { skill: isSenior ? "Architectural Trade-offs" : "Learning Agility", importance: "medium", reason: isSenior ? "Weighing long-term maintenance costs" : "Adopting evolving libraries" },
       ],
     };
   }
@@ -177,15 +230,15 @@ function getHeuristicSkills(role: string, level: string): RoleSkillRequirement {
       company: "Target Company",
       level,
       technicalSkills: [
-        { skill: "API Design & REST/GraphQL", importance: "high", reason: "Building resilient client-server contracts" },
-        { skill: "Database Schema & Query Optimization", importance: "high", reason: "Data integrity, indexing, and transactional boundaries" },
-        { skill: "System Architecture & Concurrency", importance: isSenior ? "high" : "medium", reason: "Scaling services under load and handling async workflows" },
-        { skill: "Security & Authentication", importance: "medium", reason: "Securing endpoints and managing credentials" },
+        { skill: "API Design & HTTP Contracts", importance: "high", reason: "Resilient REST/GraphQL contracts and error handling" },
+        { skill: "Database Schema & Query Optimization", importance: "high", reason: "Indexing, relational integrity, and transaction boundaries" },
+        { skill: "System Architecture & Scaling", importance: isSenior ? "high" : "medium", reason: "Load handling, caching, and async workers" },
+        { skill: "Security & Authentication", importance: "medium", reason: "Securing endpoints and managing JWT/credentials" },
       ],
       softSkills: [
-        { skill: "Problem Solving", importance: "high", reason: "Troubleshooting distributed bugs and performance bottlenecks" },
-        { skill: "Technical Communication", importance: "high", reason: "Documenting APIs and collaborating with frontend teams" },
-        { skill: "Architectural Decision Making", importance: "medium", reason: "Weighing trade-offs between consistency and latency" },
+        { skill: "Problem Solving", importance: "high", reason: "Isolating distributed bottlenecks methodically" },
+        { skill: "Technical Communication", importance: "high", reason: "Explaining API contracts and collaborating with clients" },
+        { skill: "Engineering Trade-offs", importance: "medium", reason: "Balancing consistency vs latency vs development velocity" },
       ],
     };
   }
@@ -195,22 +248,19 @@ function getHeuristicSkills(role: string, level: string): RoleSkillRequirement {
     company: "Target Company",
     level,
     technicalSkills: [
-      { skill: "Data Structures & Algorithms", importance: "high", reason: "Core computational efficiency and code structure" },
-      { skill: "Clean Code & Software Design", importance: "high", reason: "Maintainable, testable, and modular implementations" },
-      { skill: "Debugging & Problem Diagnosis", importance: "high", reason: "Isolating root causes methodically" },
-      { skill: "System Architecture", importance: isSenior ? "high" : "medium", reason: "Designing scalable, decoupled components" },
+      { skill: "Data Structures & Computational Efficiency", importance: "high", reason: "Selecting appropriate algorithms and space/time tradeoffs" },
+      { skill: "Clean Code & Modularity", importance: "high", reason: "Maintainable, testable, and decoupled codebases" },
+      { skill: "Debugging & Problem Diagnosis", importance: "high", reason: "Isolating root causes with structured analysis" },
+      { skill: "System Architecture", importance: isSenior ? "high" : "medium", reason: "Designing scalable components" },
     ],
     softSkills: [
-      { skill: "Clear Communication", importance: "high", reason: "Explaining thought process during technical implementation" },
-      { skill: "Analytical Thinking", importance: "high", reason: "Breaking down ambiguous requirements into steps" },
+      { skill: "Clear Communication", importance: "high", reason: "Explaining thought process during technical reasoning" },
+      { skill: "Analytical Thinking", importance: "high", reason: "Breaking down ambiguous requirements into actionable steps" },
       { skill: "Handling Feedback", importance: "medium", reason: "Iterating collaboratively on technical solutions" },
     ],
   };
 }
 
-/**
- * Dynamically generate recommended role skills using OmniRoute with robust heuristic fallback.
- */
 /**
  * Dynamically generate recommended role skills using OmniRoute with robust heuristic fallback.
  */
@@ -317,10 +367,12 @@ export function buildInterviewSystemPrompt(args: {
   selfAssessedLevel?: InterviewDifficulty | null;
   targetCompany?: string | null;
   targetRole?: string | null;
+  roleSkills?: RoleSkillRequirement | null;
   questionCount: number;
   coveredTopics: string[];
   durationMinutes: number;
   previousQuestions?: string[];
+  currentStage?: InterviewStage;
 }): string {
   const topics =
     args.coveredTopics.length > 0 ? args.coveredTopics.join(", ") : "none yet";
@@ -330,59 +382,92 @@ export function buildInterviewSystemPrompt(args: {
       ? args.previousQuestions.map((q, i) => `${i + 1}. "${q}"`).join("\n")
       : "None yet (Turn 1 introduction)";
 
-  return `You are a seasoned, supportive, yet rigorous technical interviewer conducting a realistic software interview.
+  // Format competencies from roleSkills
+  const technicalCompetencies = args.roleSkills?.technicalSkills?.length
+    ? args.roleSkills.technicalSkills.map((s) => `- ${s.skill} (${s.importance}): ${s.reason}`).join("\n")
+    : `- ${args.targetSkill ?? "General Software Development"}: Core focus for this interview`;
 
-Interview Target Profile:
+  const softCompetencies = args.roleSkills?.softSkills?.length
+    ? args.roleSkills.softSkills.map((s) => `- ${s.skill}: ${s.reason}`).join("\n")
+    : "- Technical Communication: Explaining engineering thoughts clearly\n- Problem Solving: Systematic debugging and design";
+
+  const stage = args.currentStage || determineInterviewStage(args.questionCount);
+
+  return `You are an experienced, professional, and observant human technical interviewer conducting a live software engineering interview.
+
+Target Profile:
 - Role: ${args.targetRole ?? "Software Developer"}
-- Company: ${args.targetCompany ?? "Tech Company"}
-- Candidate Self-Assessed Level: ${args.selfAssessedLevel ?? args.difficulty}
-- Primary Skill to Assess: ${args.targetSkill ?? "General Software Development"}
+- Target Company: ${args.targetCompany ?? "Tech Company"} (use company context naturally for scale/expectations, never pretend to leak confidential company questions)
+- Candidate Stated Level: ${args.selfAssessedLevel ?? args.difficulty}
+- Current Session Difficulty: ${args.difficulty}
 - Target Duration: ${args.durationMinutes} minutes
 
-Candidate GitHub Context (ground questions in these real projects when applicable):
+Required Competencies to Evaluate:
+Technical Skills:
+${technicalCompetencies}
+
+Soft Skills:
+${softCompetencies}
+
+Candidate GitHub Context (Use as background evidence for project topics, but treat as unverified until candidate explains their personal ownership):
 ${asGithubContext(args.githubMetadata)}
 
-Current Interview State:
+Session Progress:
 - Questions Completed: ${args.questionCount}
-- Difficulty Setting: ${args.difficulty}
+- Active Interview Stage: ${stage}
 - Topics Already Covered: ${topics}
 
-Questions Already Asked in this Session:
+Questions Already Asked:
 ${questionHistory}
 
-Interview Structure & Pacing:
-- Turn 1: Warm introduction & icebreaker.
-  * Welcome candidate to their interview for ${args.targetRole ?? "the position"} at ${args.targetCompany ?? "our company"}.
-  * State the interview structure briefly: starting with a brief background and project discussion, followed by adaptive technical questions.
-  * Ask them to introduce themselves and discuss a standout project they built or are proud of.
-- Turn 2: Behavioral / HR / Project reflection question calibrated to seniority:
-  * Junior/Beginner: Overcoming a challenging bug, learning new tools, receiving constructive critique.
-  * Mid/Senior: Handling technical trade-offs, resolving system failures, architectural disagreements, or why they are passionate about this role.
-- Turn 3+: Core technical assessment. Alternate across question types:
-  * Conceptual (fundamental theory & how things work under the hood)
-  * Practical (designing or structuring code for real-world scenarios)
-  * Debugging (diagnosing performance leaks, concurrency issues, or edge cases)
-  * System Design / Architecture (component composition, scaling, trade-offs)
-  * Trade-off questions ("Why choose approach X over Y?")
+INTERVIEW STRUCTURE & STAGES:
+1. Stage 1 (Introduction & Icebreaker):
+   - Welcome candidate warmly and professionally to their interview for ${args.targetRole ?? "the role"} at ${args.targetCompany ?? "our company"}.
+   - In 1 sentence, explain the structure: starting with background and a standout project, moving into role-specific technical questions, and exploring practical scenarios.
+   - Ask an open icebreaker: introduce their background and describe a technical project they built or are proud of.
+2. Stage 2 (General / Behavioral Question):
+   - Ask a normal behavioral question calibrated to seniority:
+     * Junior/Mid: A difficult bug or unexpected roadblock faced in a project and how they solved it; or how they approach learning unfamiliar technologies.
+     * Senior: Handling a technical disagreement, managing technical debt vs velocity, or post-mortem of a production incident.
+3. Stage 3 (Project Deep-Dive & Architecture):
+   - Investigate the project the candidate mentioned or a standout project from their GitHub.
+   - Ask about architecture, why they chose specific libraries, how state/data flows, and critically: "What part did you personally implement?"
+4. Stage 4 (GitHub & Technology Verification):
+   - Test understanding of a technology they claimed in their project (e.g. React, Node, PostgreSQL).
+   - Do NOT ask merely because package.json contains a dependency. Probe practical choices and trade-offs.
+5. Stage 5 (Core Skill Fundamentals):
+   - Test fundamental concepts of the primary skill (e.g., in React: reconciliation, component lifecycle/hooks, re-renders, state vs props; in JS: event loop, closures, promises).
+6. Stage 6 (Practical Scenarios & Debugging):
+   - Give a real-world scenario (e.g., table with 10,000 live updating rows causing lag; memory leak profiling; graceful degradation on network drops).
+7. Stage 7 (Retrospective & Wrap-Up):
+   - Ask a reflective question ("What would you change if you rebuilt that project with another month?") and conclude politely.
 
-Strict Rules:
-1. NEVER repeat an already asked question, re-ask with slightly different wording, or duplicate topics unnecessarily.
-2. Ask exactly ONE concise question at a time. Do not stack multiple questions in one turn.
-3. Adaptive depth:
-   - Strong answer demonstrating depth: Acknowledge briefly and increase depth, explore realistic edge cases, or ask a trade-off/architecture follow-up.
-   - Struggling, partial, or hesitant answer: Be encouraging, ask a clarifying or foundational follow-up question to help the candidate reason through the problem instead of abruptly jumping to a difficult topic.
-4. Keep primary skill (${args.targetSkill ?? "General Software Development"}) as the central theme, but incorporate realistic behavioral and engineering practices.
-5. Set finished=true only when 5 to 7 rich questions have been completed and sufficient evidence is collected.
+INTERVIEWER BEHAVIOR & RULES:
+1. LISTEN BEFORE MOVING ON:
+   - If candidate's answer is VAGUE, SHALLOW, or INCOMPLETE (e.g., "PostgreSQL is good for structured data"):
+     DO NOT jump to a new topic! Ask a targeted follow-up: "What kind of structured data did you have in your project, and what made PostgreSQL a better fit than a document store?"
+   - If candidate's answer is STRONG and DETAILED:
+     Acknowledge concisely ("Understood.", "Got it.", "Makes sense.") and advance to the next technical dimension or practical scenario.
+2. CONCISE & HUMAN:
+   - Ask exactly ONE clear question at a time.
+   - Never pile multiple questions together.
+   - Never say "Great answer! You're doing fantastic!". Use realistic, neutral professional acknowledgments.
+3. NEVER REPEAT:
+   - Do not ask questions that repeat previous questions or re-test an already proven topic.
+4. COMPLETION:
+   - Set finished=true when 7 to 9 rich questions covering background, project, core skills, and scenarios have been completed.
 
 Return ONLY valid JSON with this exact shape:
 {
-  "question": "your concise spoken question (or introduction + greeting on turn 1)",
+  "answerQuality": "strong | shallow | vague | partial | incorrect",
+  "stage": "${stage}",
+  "question": "concise spoken question for the candidate",
   "difficulty": "Beginner | Intermediate | Advanced",
-  "topic": "topic area",
-  "questionType": "introduction | behavioral | conceptual | practical | debugging | scenario | architecture | trade-off | follow-up",
+  "topic": "current topic area",
+  "questionType": "introduction | behavioral | conceptual | practical | debugging | scenario | architecture | trade-off | follow-up | wrap-up",
   "skillAssessed": "specific skill name being tested",
-  "followUp": false,
-  "finished": false
+  "followUp": true | false,
+  "finished": true | false
 }`;
 }
 
@@ -392,6 +477,7 @@ export function buildTurnInstruction(args: {
   firstTurn?: boolean;
   targetRole?: string | null;
   targetCompany?: string | null;
+  currentStage?: InterviewStage;
 }): string {
   const conversation = args.messages.map((item) => ({
     speaker: item.type === "Assistant" ? "interviewer" : "candidate",
@@ -399,22 +485,26 @@ export function buildTurnInstruction(args: {
   }));
 
   if (args.firstTurn) {
-    return `Start the interview with Turn 1:
-1. Give a warm, concise interviewer greeting (welcome them to their interview for ${args.targetRole ?? "the software role"} at ${args.targetCompany ?? "our team"}).
-2. Explain that you will explore both practical technical concepts and real-world project experiences, adapting the difficulty along the way.
-3. Conclude with an open, conversational icebreaker asking the candidate to introduce their background and describe a technical project they built or are proud of from their GitHub/work experience.
-
+    return `Start the interview with Stage 1 (Introduction):
+1. Welcome candidate warmly to their interview for ${args.targetRole ?? "the software role"} at ${args.targetCompany ?? "our company"}.
+2. State the interview format in 1 sentence (starting with background and project discussion, then technical depth and practical scenarios).
+3. Conclude with an open icebreaker asking them to introduce themselves and highlight a standout technical project they've built.
 Keep the total opening under 3-4 sentences so it is natural to listen to.`;
   }
 
-  return `The candidate's latest answer was:
+  const stage = args.currentStage || "stage_2_behavioral";
+
+  return `The candidate's latest spoken answer was:
 "${args.latestAnswer ?? ""}"
 
-Review the full conversation below before selecting the next move:
-- If this is Turn 2, ask a behavioral or situational question suited to their level.
-- If Turn 3+, assess technical skills across diverse question types (conceptual, practical, debugging, architecture, trade-off).
-- Do NOT repeat questions already asked.
-- Adapt difficulty based on whether their answer demonstrated strong depth, partial understanding, or confusion.
+Instructions for this turn:
+1. Evaluate the candidate's latest answer:
+   - Was it shallow, vague, or fewer than 15 words?
+   - Did they claim a technology without explaining how they used it?
+   - If shallow or vague, set followUp=true and ask a clarifying follow-up question on that SAME topic to test their actual depth.
+   - If they gave a strong, well-reasoned answer, set followUp=false and advance to the next question for ${stage}.
+2. Check the conversation history to avoid repeating any previous topic or question.
+3. Keep your response conversational and concise (1-2 sentences).
 
 Full conversation so far:
 ${JSON.stringify(conversation)}`;
@@ -425,25 +515,29 @@ export function questionCount(messages: InterviewMessage[]): number {
 }
 
 export function coveredTopics(messages: InterviewMessage[]): string[] {
-  const topicSignals: Record<(typeof TOPICS)[number], RegExp> = {
-    Programming: /javascript|typescript|python|java|coding|program|complexity|variable|scope/i,
-    "Data Structures & Algorithms":
-      /algorithm|array|linked list|tree|graph|hash map|complexity|stack|queue/i,
-    OOP: /object[- ]oriented|class|inheritance|polymorphism|encapsulation/i,
-    Databases: /database|sql|query|index|transaction|mongodb|postgres|schema|orm/i,
-    APIs: /api|rest|graphql|endpoint|authentication|authorization|jwt|http/i,
-    "Web Development":
-      /react|frontend|browser|html|css|web development|component|dom|hook|state/i,
-    Backend: /backend|server|node|service|queue|cache|scaling|redis|express/i,
-    "Software Engineering":
-      /testing|debug|deployment|architecture|ci\/cd|code review|trade-off|behavioral/i,
-  };
+  const assistantMessages = messages.filter((m) => m.type === "Assistant");
+  const extractedTopics = new Set<string>();
 
-  return TOPICS.filter((topic) =>
-    messages.some(
-      (message) =>
-        message.type === "Assistant" &&
-        topicSignals[topic].test(message.message),
-    ),
-  );
+  const topicPatterns: [string, RegExp][] = [
+    ["React & Component Architecture", /react|component|jsx|hook|useeffect|usestate|re-render|virtual dom/i],
+    ["JavaScript & Runtime", /javascript|typescript|closure|event loop|async|promise|prototype/i],
+    ["State Management", /state|context|redux|zustand|flux|store/i],
+    ["Web Performance", /performance|render|memo|bundle|lazy|lcp|lighthouse/i],
+    ["Databases & Data Modeling", /database|sql|postgres|mongodb|query|index|schema|transaction/i],
+    ["APIs & Networking", /api|rest|graphql|http|endpoint|fetch|axios/i],
+    ["System Design & Scaling", /scale|architecture|concurrency|queue|cache|redis|latency/i],
+    ["Debugging & Error Handling", /debug|devtools|memory leak|exception|error|troubleshoot/i],
+    ["Project Ownership & Trade-offs", /project|built|trade-off|architecture|decision|refactor/i],
+    ["Behavioral & Collaboration", /conflict|priority|roadblock|team|challenge|deadline/i],
+  ];
+
+  for (const msg of assistantMessages) {
+    for (const [topicName, pattern] of topicPatterns) {
+      if (pattern.test(msg.message)) {
+        extractedTopics.add(topicName);
+      }
+    }
+  }
+
+  return Array.from(extractedTopics);
 }

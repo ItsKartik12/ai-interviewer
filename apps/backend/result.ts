@@ -142,6 +142,7 @@ export async function calculateResult(
     company?: string | null;
     targetSkill?: string | null;
     selfAssessedLevel?: string | null;
+    roleSkills?: unknown;
   },
 ): Promise<InterviewEvaluation> {
   const fallbackLevel =
@@ -158,10 +159,11 @@ Target Role Profile:
 - Company: ${context?.company ?? "Tech Company"}
 - Primary Skill Target: ${context?.targetSkill ?? "Software Development"}
 - Candidate Self-Assessed Level: ${context?.selfAssessedLevel ?? "Intermediate"}
+${context?.roleSkills ? `- Evaluated Role Framework Competencies: ${JSON.stringify(context.roleSkills)}` : ""}
 
 CRITICAL EVALUATION GUIDELINES:
 1. Evaluate ONLY skills and topics that were ACTUALLY discussed and tested in the transcript.
-2. Do NOT invent candidate behavior or score skills that were never asked about.
+2. If a skill was NOT tested in the transcript, DO NOT invent candidate responses, scores, or hallucinate evidence.
 3. For each assessed technical skill:
    - Provide a realistic score from 0 to 100.
    - Assign the demonstrated level ("Beginner" | "Intermediate" | "Advanced").
