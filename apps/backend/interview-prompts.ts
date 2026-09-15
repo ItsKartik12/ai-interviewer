@@ -16,6 +16,19 @@ export type SkillItem = {
   rationale?: string;
 };
 
+export type ResumeContext = {
+  candidateName?: string | null;
+  documentType?: "resume" | "project_report" | "mixed";
+  projects: string[];
+  technologies: string[];
+  experience: string[];
+  education: string[];
+  achievements: string[];
+  certifications?: string[];
+  rawSummary: string;
+};
+
+
 export type RoleSkillRequirement = {
   role: string;
   company: string;
@@ -117,10 +130,12 @@ function asGithubContext(githubMetadata: unknown): string {
 
   const meta = githubMetadata as Record<string, unknown>;
   if (meta.summary && typeof meta.summary === "string") {
-    return meta.summary;
+    // Already a pre-built summary string — cap at 600 chars to prevent token bloat
+    return meta.summary.slice(0, 600);
   }
 
-  return JSON.stringify(githubMetadata);
+  // Fallback: serialize but hard-cap to prevent large object embedding
+  return JSON.stringify(githubMetadata).slice(0, 600);
 }
 
 function normalizeDifficulty(
@@ -342,7 +357,126 @@ function getHeuristicSkills(role: string, level: string): RoleSkillRequirement {
 }
 
 /**
- * Dynamically generate recommended role skills using OmniRoute with robust heuristic fallback.
+ * Parse a candidate's uploaded PDF resume or project report text into structured context using LLM.
+ * Falls back to a clean heuristic structure if LLM fails or is offline.
+ */
+export async function parseResumeText(rawText: string): Promise<ResumeContext> {
+  const trimmed = rawText.trim();
+
+  // Minimal fallback
+  const fallback: ResumeContext = {
+    candidateName: null,
+    documentType: "mixed",
+    projects: [],
+    technologies: [],
+    experience: [],
+    education: [],
+    achievements: [],
+    certifications: [],
+    rawSummary: trimmed.slice(0, 800),
+  };
+
+  if (!trimmed || trimmed.length < 25) return fallback;
+
+  try {
+    const prompt = `You are a precise technical document analyzer. Extract structured candidate evidence from this resume or project report.
+
+Candidate Document Text:
+${trimmed.slice(0, 4500)}
+
+INSTRUCTIONS:
+1. Distinguish between:
+   - explicitly stated facts (extract exactly)
+   - unavailable information (leave array empty or null, DO NOT FABRICATE)
+2. If document is primarily a project report, prioritize extracting project details, architecture, technologies, and implementation details.
+3. If document is a standard resume, extract work history, projects, tech stack, and education.
+4. Categorize documentType as "resume", "project_report", or "mixed".
+
+Return ONLY valid JSON with this exact shape:
+{
+  "candidateName": "Full Name if stated, else null",
+  "documentType": "resume | project_report | mixed",
+  "projects": ["Project Name: brief description, key architecture or features"],
+  "technologies": ["Technology, library, or programming language"],
+  "experience": ["Role at Organization (duration): key responsibilities or contributions"],
+  "education": ["Degree, Major, Institution, Year"],
+  "achievements": ["Notable competition, honor, or quantifiable accomplishment"],
+  "certifications": ["Certification name or credential"]
+}
+
+Keep each list item concise (1-2 sentences). Return strictly valid JSON.`;
+
+    const response = await askOmniRoute([
+      { role: "system", content: "You are an expert technical resume and project report parser. Extract factual information only. Return strictly valid JSON." },
+      { role: "user", content: prompt },
+    ]);
+
+    const cleaned = response
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    const parsed = JSON.parse(cleaned) as Partial<ResumeContext>;
+
+    return {
+      candidateName: typeof parsed.candidateName === "string" && parsed.candidateName.trim() ? parsed.candidateName.trim() : null,
+      documentType: parsed.documentType === "project_report" || parsed.documentType === "resume" ? parsed.documentType : "mixed",
+      projects: Array.isArray(parsed.projects) ? parsed.projects.slice(0, 8).map(String) : [],
+      technologies: Array.isArray(parsed.technologies) ? parsed.technologies.slice(0, 15).map(String) : [],
+      experience: Array.isArray(parsed.experience) ? parsed.experience.slice(0, 6).map(String) : [],
+      education: Array.isArray(parsed.education) ? parsed.education.slice(0, 4).map(String) : [],
+      achievements: Array.isArray(parsed.achievements) ? parsed.achievements.slice(0, 5).map(String) : [],
+      certifications: Array.isArray(parsed.certifications) ? parsed.certifications.slice(0, 5).map(String) : [],
+      rawSummary: trimmed.slice(0, 800),
+    };
+  } catch (err) {
+    console.warn("[resume] parseResumeText fallback:", err instanceof Error ? err.message : err);
+    return fallback;
+  }
+}
+
+/**
+ * Format a ResumeContext into a readable prompt block for the interviewer.
+ */
+function formatResumeContext(resume: ResumeContext | null | undefined): string {
+  if (!resume) return "No resume or project document provided. Ask the candidate directly about their background and projects.";
+
+  const lines: string[] = [];
+
+  if (resume.candidateName) {
+    lines.push(`Candidate Name (stated): ${resume.candidateName}`);
+  }
+  if (resume.documentType) {
+    lines.push(`Document Type: ${resume.documentType === "project_report" ? "Technical Project Report" : "Candidate Resume / CV"}`);
+  }
+  if (resume.projects.length > 0) {
+    lines.push("Projects (candidate claims — verify architecture, choices, and personal contribution):");
+    resume.projects.forEach((p) => lines.push(`  - ${p}`));
+  }
+  if (resume.technologies.length > 0) {
+    lines.push(`Technologies listed (verify depth): ${resume.technologies.join(", ")}`);
+  }
+  if (resume.experience.length > 0) {
+    lines.push("Work Experience (candidate claims — explore responsibilities):");
+    resume.experience.forEach((e) => lines.push(`  - ${e}`));
+  }
+  if (resume.education.length > 0) {
+    lines.push("Education:");
+    resume.education.forEach((e) => lines.push(`  - ${e}`));
+  }
+  if (resume.achievements && resume.achievements.length > 0) {
+    lines.push("Achievements / Honors:");
+    resume.achievements.forEach((a) => lines.push(`  - ${a}`));
+  }
+
+  return lines.length > 0
+    ? lines.join("\n")
+    : "Document provided but no structured technical details could be parsed. Ask direct questions.";
+}
+
+/**
+ * Dynamically generate recommended role skills based on role, company, level, resume/project PDF, and GitHub.
+ * Generates skills with priorities (Core Requirement, Important, Supporting).
  */
 export async function generateRoleSkills(args: {
   role: string;
@@ -352,10 +486,19 @@ export async function generateRoleSkills(args: {
   skill?: string;
   githubMetadata?: unknown;
   context?: string;
+  resumeContext?: ResumeContext | null;
 }): Promise<RoleSkillRequirement> {
   const resolvedCompany = args.company || "Target Company";
   const resolvedLevel = args.level || "Intermediate";
-  const resolvedSkill = args.targetSkill || args.skill || "Software Development";
+
+  // Synthesize candidate technology context from resume
+  const candidateTech = args.resumeContext?.technologies?.length
+    ? args.resumeContext.technologies.join(", ")
+    : args.targetSkill || args.skill || "Software Development";
+
+  const candidateProjects = args.resumeContext?.projects?.length
+    ? args.resumeContext.projects.slice(0, 3).join("; ")
+    : "None stated";
 
   const heuristic = getHeuristicSkills(args.role, resolvedLevel);
   heuristic.company = resolvedCompany;
@@ -363,32 +506,41 @@ export async function generateRoleSkills(args: {
 
   try {
     const prompt = `You are a principal technical recruiter and engineering leader.
-Analyze this interview target profile and output recommended technical and soft skills for this specific role, company, and seniority level:
+Analyze this candidate profile and dynamically recommend 4 to 6 technical skills and 2 to 3 soft skills for this specific interview:
+
 - Target Role: ${args.role}
 - Target Company: ${resolvedCompany}
-- Seniority Level: ${resolvedLevel}
-- Primary Skill Focus: ${resolvedSkill}
-- Candidate GitHub context: ${asGithubContext(args.githubMetadata)}
+- Self-Assessed Seniority Level: ${resolvedLevel}
+- Candidate Resume/Project Technologies: ${candidateTech}
+- Candidate Projects: ${candidateProjects}
+- GitHub Context: ${asGithubContext(args.githubMetadata)}
 
-Do NOT claim these are verified official company criteria; frame them as realistic, recommended skills for this profile.
+GUIDELINES FOR DYNAMIC SKILL GENERATION:
+1. Tailor the skills to the specific role and company style (e.g. Google frontend emphasizes browser internals, performant DOM, JavaScript runtime; backend emphasizes distributed architecture, database scaling).
+2. Bridge the role requirements with the candidate's actual projects and technologies where relevant.
+3. Assign each skill an importance:
+   - "core" (Core Requirement — mandatory foundational competencies for this role)
+   - "important" (Important — practical design, state, performance, architecture)
+   - "bonus" (Supporting — specialized differentiator or advanced tooling)
+4. For each skill, provide a concise 1-sentence reason explaining why it is recommended for this candidate targeting this role and company.
+5. Do NOT fabricate confidential internal company secrets; use public engineering culture expectations.
 
 Return ONLY valid JSON with this exact shape:
 {
   "role": "${args.role}",
   "company": "${resolvedCompany}",
   "level": "${resolvedLevel}",
-  "summary": "Recommended evaluation framework for ${args.role} at ${resolvedCompany}",
+  "summary": "Tailored competency evaluation plan for ${args.role} at ${resolvedCompany}",
   "technicalSkills": [
-    { "skill": "Skill Name", "importance": "high", "reason": "concise rationale" }
+    { "skill": "Skill Name", "importance": "core | important | bonus", "reason": "concise rationale" }
   ],
   "softSkills": [
-    { "skill": "Skill Name", "importance": "high", "reason": "concise rationale" }
+    { "skill": "Skill Name", "importance": "core | important | bonus", "reason": "concise rationale" }
   ]
-}
-Include 3 to 5 key technical skills and 2 to 3 soft skills. Keep rationales concise (1 sentence).`;
+}`;
 
     const response = await askOmniRoute([
-      { role: "system", content: "You are an expert technical interviewer who returns strictly valid JSON." },
+      { role: "system", content: "You are an expert technical interviewer and talent strategist. Return strictly valid JSON." },
       { role: "user", content: prompt },
     ]);
 
@@ -408,18 +560,27 @@ Include 3 to 5 key technical skills and 2 to 3 soft skills. Keep rationales conc
         role: args.role,
         company: resolvedCompany,
         level: resolvedLevel,
-        summary: parsed.summary || `Recommended competencies for ${args.role} at ${resolvedCompany}`,
-        technicalSkills: parsed.technicalSkills.map((item) => ({
-          skill: String(item.skill || "Technical Skill"),
-          importance: item.importance === "medium" ? "medium" : "high",
-          reason: String(item.reason || item.rationale || "Relevant for the role"),
-          rationale: String(item.rationale || item.reason || "Relevant for the role"),
-        })),
+        summary: parsed.summary || `Recommended evaluation plan for ${args.role} at ${resolvedCompany}`,
+        technicalSkills: parsed.technicalSkills.map((item) => {
+          const rawImp = (item.importance || "").toLowerCase();
+          const importance =
+            rawImp === "core" || rawImp === "high"
+              ? "core"
+              : rawImp === "bonus" || rawImp === "supporting"
+                ? "bonus"
+                : "important";
+          return {
+            skill: String(item.skill || "Technical Skill"),
+            importance,
+            reason: String(item.reason || item.rationale || "Recommended for this role"),
+            rationale: String(item.reason || item.rationale || "Recommended for this role"),
+          };
+        }),
         softSkills: parsed.softSkills.map((item) => ({
           skill: String(item.skill || "Soft Skill"),
-          importance: item.importance === "medium" ? "medium" : "high",
-          reason: String(item.reason || item.rationale || "Essential interpersonal skill"),
-          rationale: String(item.rationale || item.reason || "Essential interpersonal skill"),
+          importance: item.importance === "core" || item.importance === "high" ? "core" : "important",
+          reason: String(item.reason || item.rationale || "Essential communication skill"),
+          rationale: String(item.reason || item.rationale || "Essential communication skill"),
         })),
       };
     }
@@ -431,23 +592,86 @@ Include 3 to 5 key technical skills and 2 to 3 soft skills. Keep rationales conc
     ...heuristic,
     technicalSkills: heuristic.technicalSkills.map((item) => ({
       ...item,
+      importance: item.importance === "high" ? "core" : "important",
       rationale: item.reason,
     })),
     softSkills: heuristic.softSkills.map((item) => ({
       ...item,
+      importance: item.importance === "high" ? "core" : "important",
       rationale: item.reason,
     })),
   };
+}
+
+
+/**
+ * Return focused stage instructions: full detail for current + next stage only.
+ * Other stages referenced by name to keep prompt compact.
+ */
+function buildStageInstructions(
+  stage: InterviewStage,
+  targetRole?: string | null,
+  targetCompany?: string | null,
+  technicalCompetencies?: string,
+): string {
+  const role = targetRole ?? "the role";
+  const company = targetCompany ?? "our company";
+  const skills = technicalCompetencies ?? "core technical skills";
+
+  const stageMap: Record<InterviewStage, string> = {
+    stage_1_introduction: `[CURRENT] stage_1_introduction — Introduction & Icebreaker:
+   - Welcome candidate warmly and professionally to their interview for ${role} at ${company}.
+   - In 1 sentence explain format: background & standout project, technical depth, practical scenarios, wrap-up.
+   - Ask open icebreaker: introduce themselves and highlight a standout technical project they built.
+[NEXT] stage_2_behavioral — ask a realistic behavioral question about a challenge, roadblock, or technical disagreement.`,
+
+    stage_2_behavioral: `[CURRENT] stage_2_behavioral — Behavioral:
+   - Junior/Mid: Ask about a difficult bug or unexpected roadblock and how they solved it, or how they learn new tech.
+   - Senior: Ask about handling technical disagreement, technical debt vs velocity, or a production incident post-mortem.
+[NEXT] stage_3_project_experience — investigate the candidate's mentioned project: architecture, library choices, personal contributions.`,
+
+    stage_3_project_experience: `[CURRENT] stage_3_project_experience — Project Deep-Dive:
+   - Investigate the project from their background or what they mentioned in the icebreaker.
+   - Ask about architecture decisions, library choices, how data flows, and critically: "What part did you personally build?"
+[NEXT] stage_4_core_skills — test fundamental knowledge of their selected skills (${skills}).`,
+
+    stage_4_core_skills: `[CURRENT] stage_4_core_skills — Core Skill Fundamentals:
+   - Actively assess selected skills: ${skills}.
+   - Test fundamental principles (e.g., React: reconciliation, hooks, re-renders; JS: event loop, closures, promises; DB: indexing, transactions).
+   - Go beyond GitHub repos into general technical knowledge.
+[NEXT] stage_5_practical_scenario — a real-world practical situation or implementation challenge.`,
+
+    stage_5_practical_scenario: `[CURRENT] stage_5_practical_scenario — Practical Scenario:
+   - Pose a real-world situation (e.g., table with 10,000 live-updating rows causing lag; resilient error states on network drop; caching strategy).
+   - Assess applied judgment, not just theory.
+[NEXT] stage_6_debugging_problem_solving — concrete debugging or troubleshooting scenario.`,
+
+    stage_6_debugging_problem_solving: `[CURRENT] stage_6_debugging_problem_solving — Debugging & Problem Solving:
+   - Concrete troubleshooting scenario: bug diagnosis, isolating race conditions, memory leaks, or error handling.
+[NEXT] stage_7_deeper_follow_up — probe architectural trade-offs and edge cases from prior answers.`,
+
+    stage_7_deeper_follow_up: `[CURRENT] stage_7_deeper_follow_up — Deeper Follow-Up & Trade-offs:
+   - Probe previous answers for architectural trade-offs, why this approach over an alternative, edge cases, or failure modes.
+[NEXT] stage_8_wrap_up — ask a reflective wrap-up question and close warmly.`,
+
+    stage_8_wrap_up: `[CURRENT] stage_8_wrap_up — Reflective Wrap-Up:
+   - Ask a reflective question: "What would you change if you rebuilt that project with another month?" or "Any questions for me?"
+   - Conclude warmly. Set finished=true when done.`,
+  };
+
+  return stageMap[stage] ?? stageMap["stage_4_core_skills"];
 }
 
 export function buildInterviewSystemPrompt(args: {
   githubMetadata: unknown;
   difficulty: InterviewDifficulty;
   targetSkill?: string | null;
+  selectedSkills?: string[] | null;
   selfAssessedLevel?: InterviewDifficulty | null;
   targetCompany?: string | null;
   targetRole?: string | null;
   roleSkills?: RoleSkillRequirement | null;
+  resumeContext?: ResumeContext | null;
   questionCount: number;
   coveredTopics: string[];
   durationMinutes: number;
@@ -458,22 +682,39 @@ export function buildInterviewSystemPrompt(args: {
   const topics =
     args.coveredTopics.length > 0 ? args.coveredTopics.join(", ") : "none yet";
 
+  // Cap question history: last 6 questions, max 80 chars each — prevents prompt bloat in long sessions
+  const recentHistory = args.previousQuestions ?? [];
+  const historySlice = recentHistory.slice(-6);
   const questionHistory =
-    args.previousQuestions && args.previousQuestions.length > 0
-      ? args.previousQuestions.map((q, i) => `${i + 1}. "${q}"`).join("\n")
+    historySlice.length > 0
+      ? historySlice.map((q, i) => {
+          const num = recentHistory.length - historySlice.length + i + 1;
+          const snippet = q.length > 80 ? q.slice(0, 77) + "..." : q;
+          return `${num}. "${snippet}"`;
+        }).join("\n")
       : "None yet (Turn 1 introduction)";
 
   const targets = getDifficultyTargets(args.difficulty);
   const stage = args.currentStage || determineInterviewStage(args.questionCount, args.difficulty);
 
+  const selectedSkillsList = args.selectedSkills && args.selectedSkills.length > 0
+    ? args.selectedSkills
+    : args.targetSkill ? [args.targetSkill] : [];
+
   // Format competencies from roleSkills
   const technicalCompetencies = args.roleSkills?.technicalSkills?.length
-    ? args.roleSkills.technicalSkills.map((s) => `- ${s.skill} (${s.importance}): ${s.reason}`).join("\n")
-    : `- ${args.targetSkill ?? "General Software Development"}: Core focus for this interview`;
+    ? args.roleSkills.technicalSkills.map((s) => {
+        const isSelected = selectedSkillsList.some((sel) => sel.toLowerCase().includes(s.skill.toLowerCase()) || s.skill.toLowerCase().includes(sel.toLowerCase()));
+        return `- ${s.skill} (${s.importance})${isSelected ? " [PRIMARY FOCUS]" : ""}: ${s.reason}`;
+      }).join("\n")
+    : selectedSkillsList.length > 0
+      ? selectedSkillsList.map((s) => `- ${s} (Core): Focus area selected by candidate`).join("\n")
+      : `- ${args.targetSkill ?? "General Software Development"}: Core focus for this interview`;
 
   const softCompetencies = args.roleSkills?.softSkills?.length
     ? args.roleSkills.softSkills.map((s) => `- ${s.skill}: ${s.reason}`).join("\n")
     : "- Technical Communication: Explaining engineering thoughts clearly\n- Problem Solving: Systematic debugging and design";
+
 
   const recentQuestionTypes = args.previousQuestionTypes?.length
     ? args.previousQuestionTypes.slice(-4).join(", ")
@@ -495,7 +736,10 @@ ${technicalCompetencies}
 Soft Skills:
 ${softCompetencies}
 
-Candidate GitHub Context (Use as supporting background context, but NOT as proof of skill or the entire interview):
+Candidate Resume Context (UNVERIFIED CLAIMS — use to generate relevant questions, but do NOT treat as proof of skill. Ask verification questions for important claims):
+${formatResumeContext(args.resumeContext)}
+
+Candidate GitHub Context (Supporting context only, NOT proof of skill or the entire interview):
 ${asGithubContext(args.githubMetadata)}
 
 Session Progress & Pacing:
@@ -514,30 +758,9 @@ DIFFICULTY CALIBRATION ("SLIGHTLY EASIER THAN SELECTED LEVEL"):
   * Intermediate: 10–11 total questions. Solid engineering questions, common debugging scenarios, practical API/library usage, state handling. Slightly gentler than senior/lead expectations.
   * Expert: 15–20 total questions. Deep technical reasoning, architectural trade-offs, edge cases, system bottlenecks, but avoid obscure trivia or trick questions.
 
-INTERVIEW STRUCTURE & 8 REALISTIC STAGES:
-1. stage_1_introduction (Introduction & Icebreaker):
-   - Welcome candidate warmly and professionally to their interview for ${args.targetRole ?? "the role"} at ${args.targetCompany ?? "our company"}.
-   - In 1 sentence, explain format: background & standout project, core technical concepts, practical scenarios, and wrap-up.
-   - Ask an open icebreaker: introduce their background and describe a technical project they built or are proud of.
-2. stage_2_behavioral (General / Behavioral):
-   - Ask a realistic behavioral question:
-     * Junior/Mid: A difficult bug or unexpected roadblock faced in a project and how they solved it; or how they approach learning unfamiliar technologies.
-     * Senior: Handling technical disagreement, managing technical debt vs velocity, or post-mortem of a production incident.
-3. stage_3_project_experience (Project Deep-Dive & Architecture):
-   - Investigate the project the candidate mentioned or from their background.
-   - Ask about architecture, why they chose specific libraries, how state/data flows, and critically: "What part did you personally implement?"
-4. stage_4_core_skills (Core Skill Fundamentals & Concepts):
-   - Actively assess the candidate's selected skills (${technicalCompetencies}).
-   - Test fundamental principles (e.g., in React: reconciliation, component lifecycle/hooks, re-renders, state vs props; in JS: event loop, closures, promises; in DB: indexing, normalization, transactions).
-   - Move beyond the candidate's GitHub repo into general technical knowledge.
-5. stage_5_practical_scenario (Practical Scenarios & Real-World Situations):
-   - Real-world practical situation (e.g., table with 10,000 live updating rows causing lag; caching strategy; resilient error states on network drop).
-6. stage_6_debugging_problem_solving (Debugging & Problem Solving):
-   - Concrete troubleshooting scenario: bug diagnosis, isolating race conditions, memory leaks, or error handling.
-7. stage_7_deeper_follow_up (Deeper Follow-Up & Trade-offs):
-   - Probe previous answers: architectural trade-offs, why this approach over an alternative, edge cases.
-8. stage_8_wrap_up (Reflective Retrospective & Wrap-Up):
-   - Ask a reflective question ("What would you change if you rebuilt that project with another month? Do you have any questions for me?") and conclude warmly and politely.
+INTERVIEW STAGE GUIDE (8 stages total: introduction → behavioral → project → core_skills → practical → debugging → deeper_follow_up → wrap_up):
+Active stage: ${stage}. Focus instructions for current stage and next:
+${buildStageInstructions(stage, args.targetRole, args.targetCompany, technicalCompetencies)}
 
 LENIENT & HELPFUL INTERVIEWER RULES (HINTS & SUPPORT):
 1. SUPPORTIVE & LENIENT ON STUCK ANSWERS:
@@ -584,17 +807,26 @@ export function buildTurnInstruction(args: {
   difficulty?: InterviewDifficulty | null;
   currentStage?: InterviewStage;
   questionCount?: number;
+  resumeContext?: ResumeContext | null;
 }): string {
-  const conversation = args.messages.map((item) => ({
+  // Trim to the last 8 messages (4 exchange turns) to prevent O(n) prompt growth.
+  // The system prompt already carries last 6 question snippets + covered topics for broader context.
+  const allMessages = args.messages.map((item) => ({
     speaker: item.type === "Assistant" ? "interviewer" : "candidate",
     message: item.message,
   }));
+  const conversation = allMessages.slice(-8);
+
+  // Brief resume hint for first turn (only mention if we have real data)
+  const resumeHint = args.resumeContext && args.resumeContext.projects.length > 0
+    ? `\n(Context: candidate's resume lists projects like: ${args.resumeContext.projects.slice(0, 2).join("; ")}. You may reference one naturally in your opening icebreaker.)`
+    : "";
 
   if (args.firstTurn) {
     return `Start the interview with Stage 1 (Introduction):
 1. Welcome candidate warmly to their interview for ${args.targetRole ?? "the software role"} at ${args.targetCompany ?? "our company"}.
 2. State the interview format in 1 sentence (starting with background and project discussion, then technical depth and practical scenarios).
-3. Conclude with an open icebreaker asking them to introduce themselves and highlight a standout technical project they've built.
+3. Conclude with an open icebreaker asking them to introduce themselves and highlight a standout technical project they've built.${resumeHint}
 Keep the total opening under 3-4 sentences so it is natural to listen to.`;
   }
 
@@ -604,6 +836,9 @@ Keep the total opening under 3-4 sentences so it is natural to listen to.`;
   const isHardStop = count >= targets.maxQuestions;
 
   const stage = args.currentStage || "stage_4_core_skills";
+  const historyNote = allMessages.length > 8
+    ? `(Showing last ${conversation.length} of ${allMessages.length} messages. Earlier turns are summarized in the system prompt.)\n`
+    : "";
 
   return `The candidate's latest spoken answer was:
 "${args.latestAnswer ?? ""}"
@@ -624,8 +859,8 @@ Turn Instructions:
    - If Hard Max Reached (${isHardStop}): Conclude gracefully with finished=true.
 3. Keep spoken response concise (1-2 sentences). Do NOT cheerlead with phrases like "Awesome!" or "Great answer!".
 
-Full conversation so far:
-${JSON.stringify(conversation)}`;
+Recent conversation (last ${conversation.length} messages):
+${historyNote}${JSON.stringify(conversation)}`;
 }
 
 export function questionCount(messages: InterviewMessage[]): number {

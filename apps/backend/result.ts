@@ -205,8 +205,10 @@ export async function calculateResult(
     role?: string | null;
     company?: string | null;
     targetSkill?: string | null;
+    selectedSkills?: string[] | null;
     selfAssessedLevel?: string | null;
     roleSkills?: unknown;
+    resumeContext?: { technologies?: string[] } | null;
   },
 ): Promise<InterviewEvaluation> {
   const fallbackLevel =
@@ -216,45 +218,59 @@ export async function calculateResult(
         ? "Beginner"
         : "Intermediate";
 
-  // Collect all candidate selected skills
+  // Collect candidate selected skills
   const selectedSkillsSet = new Set<string>();
-  if (context?.targetSkill) selectedSkillsSet.add(context.targetSkill.trim());
+  if (Array.isArray(context?.selectedSkills) && context.selectedSkills.length > 0) {
+    for (const s of context.selectedSkills) {
+      if (typeof s === "string" && s.trim()) selectedSkillsSet.add(s.trim());
+    }
+  } else if (context?.targetSkill) {
+    selectedSkillsSet.add(context.targetSkill.trim());
+  }
 
+  // Also collect recommended skills from roleSkills for unassessed tracking
+  const allRecommendedSkills: string[] = [];
   if (context?.roleSkills && typeof context.roleSkills === "object") {
     const rs = context.roleSkills as Record<string, unknown>;
     if (Array.isArray(rs.technicalSkills)) {
       for (const item of rs.technicalSkills) {
-        if (item && typeof item.skill === "string") {
-          selectedSkillsSet.add(item.skill.trim());
+        if (item && typeof item.skill === "string" && item.skill.trim()) {
+          allRecommendedSkills.push(item.skill.trim());
         }
       }
     }
   }
 
   const selectedSkillsList = Array.from(selectedSkillsSet);
+  if (selectedSkillsList.length === 0 && allRecommendedSkills.length > 0) {
+    // If no specific selection was recorded, treat top recommended as selected
+    selectedSkillsList.push(...allRecommendedSkills.slice(0, 3));
+  }
 
   const systemPrompt = `You are a rigorous, evidence-based principal engineering interviewer conducting the final evaluation of an interview.
 
 Target Role Profile:
 - Role: ${context?.role ?? "Software Engineer"}
 - Company: ${context?.company ?? "Tech Company"}
-- Primary Skill Target: ${context?.targetSkill ?? "Software Development"}
+- Primary Selected Skill Focus: ${context?.targetSkill ?? selectedSkillsList.join(", ") ?? "Software Development"}
 - Candidate Self-Assessed Level: ${context?.selfAssessedLevel ?? "Intermediate"}
-- Selected Skills from Candidate Profile: ${JSON.stringify(selectedSkillsList)}
+- Candidate Selected Skills: ${JSON.stringify(selectedSkillsList)}
+- All Role Recommended Skills: ${JSON.stringify(allRecommendedSkills)}
 
 CRITICAL EVALUATION GUIDELINES (EVIDENCE-BASED EVALUATION):
 1. Distinguish between:
-   - "Selected Skills": Skills chosen in the profile (${JSON.stringify(selectedSkillsList)}).
+   - "Selected Skills": Skills chosen for evaluation (${JSON.stringify(selectedSkillsList)}).
    - "assessedSkills": Skills that were ACTUALLY questioned, tested, and demonstrated in the transcript.
-   - "notAssessedSkills": Selected skills that were NOT tested during the interview.
+   - "notAssessedSkills": Recommended or selected skills that were NOT tested during the interview.
 2. UNTESTED SKILL PROTECTION:
    - For skills in "notAssessedSkills", you MUST NOT assign a fabricated score, fabricated strengths, or fabricated weaknesses.
-   - List them strictly with { "skill": "Skill Name", "reason": "Not tested in this interview session" }.
+   - List them strictly with { "skill": "Skill Name", "reason": "Not assessed — this skill was not sufficiently tested during the interview." }.
 3. For each assessed skill:
    - Provide a realistic score from 0 to 100 based solely on their answers in the transcript.
    - Assign the demonstrated level ("Beginner" | "Intermediate" | "Advanced").
    - List concrete strengths and weaknesses observed.
    - Quote or cite specific evidence from the candidate's actual answers.
+
 4. Evaluate soft skills (Communication, Problem Solving, Structure) based on their actual phrasing and clarity.
 5. Overall score must be derived ONLY from assessed skills and discussion depth (not from untested skills or GitHub repo presence).
 

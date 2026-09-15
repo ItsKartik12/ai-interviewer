@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -1033,8 +1033,8 @@ export function Interview() {
       return {
         label: "RECONNECTING",
         desc: "Restoring audio pipeline",
-        badge: "bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse",
-        dot: "bg-amber-400 animate-ping",
+        badge: "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30 animate-pulse",
+        dot: "bg-amber-500 animate-ping",
       };
     }
     if (status === "error") {
@@ -1049,39 +1049,39 @@ export function Interview() {
       return {
         label: "PROCESSING",
         desc: "Analyzing answer & formulating turn",
-        badge: "bg-blue-500/15 text-blue-300 border-blue-500/30 animate-pulse",
-        dot: "bg-blue-400 animate-pulse",
+        badge: "bg-blue-500/15 text-blue-800 dark:text-blue-300 border-blue-500/30 animate-pulse",
+        dot: "bg-blue-500 animate-pulse",
       };
     }
     if (aiSpeaking) {
       return {
         label: "AI SPEAKING",
         desc: "Interviewer speaking (mic muted)",
-        badge: "bg-violet-500/15 text-violet-300 border-violet-500/30",
-        dot: "bg-violet-400 animate-pulse",
+        badge: "bg-violet-500/15 text-violet-800 dark:text-violet-300 border-violet-500/30",
+        dot: "bg-violet-500 animate-pulse",
       };
     }
     if (status === "transcribing") {
       return {
         label: "TRANSCRIBING",
         desc: "Converting speech to text in real time",
-        badge: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30 animate-pulse",
-        dot: "bg-cyan-400 animate-ping",
+        badge: "bg-cyan-500/15 text-cyan-800 dark:text-cyan-300 border-cyan-500/30 animate-pulse",
+        dot: "bg-cyan-500 animate-ping",
       };
     }
     if (status === "listening") {
       return {
         label: "LISTENING",
-        desc: "Microphone active â€¢ Speak your answer",
-        badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-        dot: "bg-emerald-400",
+        desc: "Microphone active • Speak your answer",
+        badge: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30",
+        dot: "bg-emerald-500",
       };
     }
     return {
       label: "READY",
       desc: "Ready to review and submit",
-      badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-      dot: "bg-emerald-400",
+      badge: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30",
+      dot: "bg-emerald-500",
     };
   })();
 
@@ -1283,35 +1283,64 @@ export function Interview() {
           </div>
 
           {/* Current Question Card */}
-          <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <span className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
-                Question {questionNumber}
-              </span>
-              {maxQuestions && (
-                <span className="text-xs text-muted-foreground">of ~{maxQuestions}</span>
-              )}
-              {context.questionType && (
-                <span className="rounded-md border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground capitalize">
-                  {context.questionType}
-                </span>
-              )}
-              {context.skillAssessed && (
-                <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/8 px-2 py-0.5 text-[11px] font-medium text-primary">
-                  <Sparkles className="size-3" />
-                  {context.skillAssessed}
-                </span>
-              )}
+          {status === "submitting" ? (
+            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
+              <div className="flex items-center gap-2 mb-4">
+                <Loader2 className="size-4 animate-spin text-primary" />
+                <span className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Processing</span>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex gap-1.5">
+                    <span className="size-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="size-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="size-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                  <p className="text-sm font-medium text-foreground">Analyzing your response...</p>
+                </div>
+                <p className="text-[12px] text-muted-foreground ml-7">
+                  Evaluating answer quality and formulating the next question.
+                </p>
+                {submittedAnswer && (
+                  <div className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">Your answer:</p>
+                    <p className="text-xs text-foreground/70 leading-relaxed line-clamp-3">{submittedAnswer}</p>
+                  </div>
+                )}
+              </div>
             </div>
-            <p className="text-base leading-relaxed text-foreground">
-              {question || (
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Generating your first questionâ€¦
+          ) : (
+            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <span className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
+                  Question {questionNumber}
                 </span>
-              )}
-            </p>
-          </div>
+                {maxQuestions && (
+                  <span className="text-xs text-muted-foreground">of ~{maxQuestions}</span>
+                )}
+                {context.questionType && (
+                  <span className="rounded-md border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground capitalize">
+                    {context.questionType}
+                  </span>
+                )}
+                {context.skillAssessed && (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/8 px-2 py-0.5 text-[11px] font-medium text-primary">
+                    <Sparkles className="size-3" />
+                    {context.skillAssessed}
+                  </span>
+                )}
+              </div>
+              <p className="text-base leading-relaxed text-foreground">
+                {question || (
+                  <span className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    Generating your first question...
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
+
 
           {/* Answer Area */}
           <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
@@ -1322,7 +1351,7 @@ export function Interview() {
                   {aiSpeaking
                     ? "Microphone paused while the interviewer speaks."
                     : status === "submitting"
-                      ? "Submitted. Analyzing and preparing next questionâ€¦"
+                      ? "Submitted. Analyzing and preparing next question..."
                       : "Voice transcription appears below. Edit freely before submitting."}
                 </p>
               </div>
@@ -1452,6 +1481,25 @@ export function Interview() {
                 </div>
               ))
             )}
+
+            {/* AI thinking indicator — shown while waiting for the LLM response */}
+            {status === "submitting" && (
+              <div className="flex gap-2 justify-start">
+                <div className="grid size-6 shrink-0 place-items-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white">
+                  <Bot className="size-3" />
+                </div>
+                <div className="rounded-2xl rounded-tl-sm border border-border bg-white px-3 py-2.5 text-[11px] shadow-xs">
+                  <p className="mb-1 font-semibold opacity-60" style={{ fontSize: "10px" }}>Interviewer</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="size-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "160ms" }} />
+                    <span className="size-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "320ms" }} />
+                    <span className="ml-1 text-muted-foreground italic">Analyzing your response…</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div ref={transcriptEndRef} />
           </div>
         </aside>

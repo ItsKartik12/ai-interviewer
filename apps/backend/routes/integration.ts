@@ -83,7 +83,7 @@ integrationRouter.post(
         },
         create: {
           uid: data.candidateId,
-          email: data.candidateEmail || `${data.candidateId}@internsetu.platform`,
+          email: data.candidateEmail || `${data.candidateId}@candidate.local`,
           name: data.candidateName || "Candidate",
           targetRole: data.targetRole,
           skills: data.skills,

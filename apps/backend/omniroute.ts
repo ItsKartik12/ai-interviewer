@@ -28,6 +28,9 @@ export async function askOmniRoute(
 
   let response: Response;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
+
   try {
     response = await fetch(endpoint, {
       method: "POST",
@@ -36,16 +39,22 @@ export async function askOmniRoute(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(requestBody),
+      signal: controller.signal,
     });
   } catch (error) {
+    clearTimeout(timeoutId);
+    const isTimeout = error instanceof Error && error.name === "AbortError";
     console.error("OmniRoute request failed", {
       endpoint,
       model: OMNIROUTE_MODEL,
-      failureType: error instanceof Error ? error.name : typeof error,
+      failureType: isTimeout ? "TimeoutError" : (error instanceof Error ? error.name : typeof error),
       message: error instanceof Error ? error.message : String(error),
     });
-    throw new Error("OmniRoute is unavailable");
+    throw new Error(isTimeout ? "OmniRoute request timed out after 30s" : "OmniRoute is unavailable");
   }
+
+  clearTimeout(timeoutId);
+
 
   const responseText = await response.text();
   let data: OmniRouteResponse;

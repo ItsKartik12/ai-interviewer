@@ -21,10 +21,47 @@ import {
   generateRoleSkills,
   getDifficultyTargets,
   parseInterviewDecision,
+  parseResumeText,
   questionCount,
+  type ResumeContext,
   type RoleSkillRequirement,
 } from "./interview-prompts.ts";
 import { integrationRouter } from "./routes/integration.ts";
+import { parsePdfDocument } from "./scrapers/pdf.ts";
+
+// --------------------------------------------------
+// MODULE-LEVEL HELPER: Parse combined jobDescription JSON
+// --------------------------------------------------
+function parseJobDesc(raw: string | null): {
+  roleSkills: RoleSkillRequirement | null;
+  resumeContext: ResumeContext | null;
+  selectedSkills: string[];
+} {
+  if (!raw) return { roleSkills: null, resumeContext: null, selectedSkills: [] };
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const selectedSkills = Array.isArray(parsed.selectedSkills)
+      ? (parsed.selectedSkills as string[]).map(String)
+      : [];
+
+    if (parsed.roleSkills !== undefined || parsed.resumeContext !== undefined) {
+      return {
+        roleSkills: (parsed.roleSkills as RoleSkillRequirement) ?? null,
+        resumeContext: (parsed.resumeContext as ResumeContext) ?? null,
+        selectedSkills,
+      };
+    }
+    // Legacy: raw roleSkills at top level
+    if (Array.isArray((parsed as any).technicalSkills)) {
+      return {
+        roleSkills: parsed as unknown as RoleSkillRequirement,
+        resumeContext: null,
+        selectedSkills,
+      };
+    }
+  } catch { /* ignore */ }
+  return { roleSkills: null, resumeContext: null, selectedSkills: [] };
+}
 
 const app = express();
 
@@ -32,7 +69,9 @@ const app = express();
 // MIDDLEWARE
 // --------------------------------------------------
 
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+
 
 app.use(
   cors({
@@ -111,6 +150,44 @@ app.post("/api/v1/analyze-role", async (req, res) => {
 });
 
 // --------------------------------------------------
+// PARSE PDF RESUME
+// --------------------------------------------------
+
+app.post("/api/v1/parse-pdf", async (req, res) => {
+  try {
+    const { pdfBase64, fileName } = req.body ?? {};
+
+    if (!pdfBase64 || typeof pdfBase64 !== "string") {
+      res.status(400).json({ error: "PDF data (base64) is required." });
+      return;
+    }
+
+    let binaryData: Uint8Array;
+    try {
+      const buf = Buffer.from(pdfBase64, "base64");
+      binaryData = new Uint8Array(buf);
+    } catch {
+      res.status(400).json({ error: "Invalid base64 PDF data." });
+      return;
+    }
+
+    const result = await parsePdfDocument(binaryData);
+
+    res.json({
+      resumeContext: result.resumeContext,
+      textPreview: result.text.slice(0, 500),
+      totalPages: result.totalPages,
+      fileName: fileName ?? "resume.pdf",
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to parse PDF";
+    console.error("[parse-pdf] Error:", message);
+    res.status(422).json({ error: message });
+  }
+});
+
+// --------------------------------------------------
 // CREATE PRE-INTERVIEW
 // --------------------------------------------------
 
@@ -128,22 +205,80 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 
     const data = parsedBody.data;
 
-    const githubUrl = data.github.endsWith("/")
-      ? data.github.slice(0, -1)
-      : data.github;
+    // --------------------------------------------------
+    // GitHub + Resume + Role Skills: all run in parallel
+    // --------------------------------------------------
+    let githubData: unknown = null;
+    const githubUrl = (data.github || "").trim().replace(/\/$/, "");
+    const githubUsername = githubUrl ? githubUrl.split("/").pop() : null;
 
-    const githubUsername = githubUrl.split("/").pop();
+    let resumeContext: ResumeContext | null = null;
 
-    if (!githubUsername) {
-      res.status(400).json({
-        error: "Invalid GitHub URL",
-      });
-      return;
+    // Pre-compute heuristic roleSkills so parallel task has the full input
+    // The LLM call inside generateRoleSkills may be slow — run it alongside scraping.
+    const alreadyHasRoleSkills =
+      data.roleSkills &&
+      Array.isArray(data.roleSkills.technicalSkills) &&
+      data.roleSkills.technicalSkills.length > 0;
+
+    const [githubResult, resumeResult, roleSkillsResult] = await Promise.allSettled([
+      // GitHub scrape (only if URL provided)
+      githubUsername
+        ? (async () => {
+            const { scrapeGithub } = await import("./scrapers/github.ts");
+            return scrapeGithub(githubUsername);
+          })()
+        : Promise.resolve(null),
+      // Resume parse (only if text provided)
+      data.resumeText && data.resumeText.trim().length >= 30
+        ? parseResumeText(data.resumeText)
+        : Promise.resolve(null),
+      // Role skills — skip if already provided by frontend (from analyze-role step)
+      alreadyHasRoleSkills
+        ? Promise.resolve(data.roleSkills)
+        : generateRoleSkills({
+            role: data.role,
+            company: data.company,
+            level: data.level,
+            targetSkill: data.skill,
+          }),
+    ]);
+
+    if (githubResult.status === "fulfilled") {
+      githubData = githubResult.value;
+    } else {
+      console.warn("[github] Scrape failed, continuing:", githubResult.reason);
     }
 
-    const { scrapeGithub } = await import("./scrapers/github.ts");
+    if (resumeResult.status === "fulfilled") {
+      resumeContext = resumeResult.value;
+      if (resumeContext) {
+        console.log("[resume] Parsed resume context:", {
+          projects: resumeContext.projects.length,
+          technologies: resumeContext.technologies.length,
+          experience: resumeContext.experience.length,
+        });
+      }
+    } else {
+      console.warn("[resume] Parse failed, continuing:", resumeResult.reason);
+    }
 
-    const githubData = await scrapeGithub(githubUsername);
+    // Resolve role skills: parallel result → frontend-provided → fallback
+    let roleSkills =
+      roleSkillsResult.status === "fulfilled" && roleSkillsResult.value
+        ? roleSkillsResult.value
+        : data.roleSkills ?? null;
+
+    if (!roleSkills || !Array.isArray(roleSkills.technicalSkills) || roleSkills.technicalSkills.length === 0) {
+      console.warn("[roleSkills] Parallel generation failed, using heuristic fallback:",
+        roleSkillsResult.status === "rejected" ? roleSkillsResult.reason : "no result");
+      roleSkills = await generateRoleSkills({
+        role: data.role,
+        company: data.company,
+        level: data.level,
+        targetSkill: data.skill,
+      });
+    }
 
     const { prisma } = await import("./db.ts");
 
@@ -160,16 +295,11 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       },
     });
 
-    // Ensure role skills are determined and attached
-    let roleSkills = data.roleSkills;
-    if (!roleSkills || !Array.isArray(roleSkills.technicalSkills) || roleSkills.technicalSkills.length === 0) {
-      roleSkills = await generateRoleSkills({
-        role: data.role,
-        company: data.company,
-        level: data.level,
-        targetSkill: data.skill,
-      });
-    }
+    // Store both roleSkills and resumeContext in jobDescription JSON
+    const jobDescriptionJson = JSON.stringify({
+      roleSkills,
+      resumeContext: resumeContext ?? null,
+    });
 
     const interview = await prisma.interview.create({
       data: {
@@ -182,8 +312,8 @@ app.post("/api/v1/pre-interview", async (req, res) => {
         targetCompany: data.company,
         targetRole: data.role,
         duration: 30,
-        githubMetadata: githubData,
-        jobDescription: JSON.stringify(roleSkills),
+        githubMetadata: githubData ?? {},
+        jobDescription: jobDescriptionJson,
         status: "Pre",
       },
     });
@@ -193,6 +323,8 @@ app.post("/api/v1/pre-interview", async (req, res) => {
     res.json({
       id: interview.id,
       roleSkills,
+      hasResume: resumeContext !== null,
+      hasGithub: githubData !== null,
     });
   } catch (error) {
     console.error("Pre-interview error:", error);
@@ -320,18 +452,13 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       return;
     }
 
-    let roleSkills: RoleSkillRequirement | null = null;
-    if (interview.jobDescription) {
-      try {
-        roleSkills = JSON.parse(interview.jobDescription);
-      } catch {
-        roleSkills = null;
-      }
-    }
+  const { roleSkills, resumeContext } = parseJobDesc(interview.jobDescription ?? null);
 
-    const targets = getDifficultyTargets(interview.difficulty);
-    const stage = determineInterviewStage(0, interview.difficulty);
+  const targets = getDifficultyTargets(interview.difficulty);
+  const stage = determineInterviewStage(0, interview.difficulty);
 
+    const aiTimerLabel = `[start] OmniRoute (interview ${interview.id})`;
+    console.time(aiTimerLabel);
     const aiResponse = await askOmniRoute([
       {
         role: "system",
@@ -343,6 +470,7 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           targetCompany: interview.targetCompany,
           targetRole: interview.targetRole,
           roleSkills,
+          resumeContext,
           questionCount: 0,
           coveredTopics: [],
           durationMinutes: interview.duration,
@@ -360,9 +488,11 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           difficulty: interview.difficulty,
           currentStage: stage,
           questionCount: 1,
+          resumeContext,
         }),
       },
     ]);
+    console.timeEnd(aiTimerLabel);
 
     if (!aiResponse) {
       throw new Error("OmniRoute returned an empty response");
@@ -463,14 +593,7 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       content: message,
     });
 
-    let roleSkills: RoleSkillRequirement | null = null;
-    if (interview.jobDescription) {
-      try {
-        roleSkills = JSON.parse(interview.jobDescription);
-      } catch {
-        roleSkills = null;
-      }
-    }
+  const { roleSkills, resumeContext } = parseJobDesc(interview.jobDescription ?? null);
 
     const targets = getDifficultyTargets(interview.difficulty);
     const currentQuestionCount = questionCount(interview.conversations);
@@ -512,6 +635,8 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       (item) => item.type === "Assistant",
     );
 
+    const respondTimerLabel = `[respond] OmniRoute (interview ${interview.id}, Q${currentQuestionCount + 1})`;
+    console.time(respondTimerLabel);
     const aiResponse = await askOmniRoute([
       {
         role: "system",
@@ -523,6 +648,7 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
           targetCompany: interview.targetCompany,
           targetRole: interview.targetRole,
           roleSkills,
+          resumeContext,
           questionCount: currentQuestionCount,
           coveredTopics: coveredTopics(interview.conversations),
           durationMinutes: interview.duration,
@@ -538,9 +664,11 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
           difficulty: interview.difficulty,
           currentStage: stage,
           questionCount: currentQuestionCount + 1,
+          resumeContext,
         }),
       },
     ]);
+    console.timeEnd(respondTimerLabel);
 
     if (!aiResponse) {
       throw new Error("OmniRoute returned an empty response");
@@ -551,23 +679,24 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
     // If hard max will be reached on this turn or decision finished:
     const isFinished = decision.finished === true || (isNearEnd && decision.questionType === "wrap-up");
 
-    // Save AI response
-    await prisma.message.create({
-      data: {
-        interviewId: interview.id,
-        type: "Assistant",
-        message: decision.question,
-      },
-    });
-
-    await prisma.interview.update({
-      where: { id: interview.id },
-      data: {
-        status: isFinished ? "Done" : "InProgress",
-        difficulty: decision.difficulty,
-        completedAt: isFinished ? new Date() : undefined,
-      },
-    });
+    // Save AI response + update interview status in parallel
+    await Promise.all([
+      prisma.message.create({
+        data: {
+          interviewId: interview.id,
+          type: "Assistant",
+          message: decision.question,
+        },
+      }),
+      prisma.interview.update({
+        where: { id: interview.id },
+        data: {
+          status: isFinished ? "Done" : "InProgress",
+          difficulty: decision.difficulty,
+          completedAt: isFinished ? new Date() : undefined,
+        },
+      }),
+    ]);
 
     res.json({
       message: decision.question,
@@ -621,13 +750,18 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     let feedback = interview.feedback;
     let status = interview.status;
 
-    let roleSkills = null;
+    let roleSkillsForResult: RoleSkillRequirement | null = null;
+    let resumeContextForResult: any = null;
     if (interview.jobDescription) {
       try {
-        roleSkills = JSON.parse(interview.jobDescription);
-      } catch {
-        roleSkills = null;
-      }
+        const raw = JSON.parse(interview.jobDescription) as Record<string, unknown>;
+        if (raw.roleSkills !== undefined || raw.resumeContext !== undefined) {
+          roleSkillsForResult = (raw.roleSkills as RoleSkillRequirement) ?? null;
+          resumeContextForResult = raw.resumeContext ?? null;
+        } else if (Array.isArray((raw as any).technicalSkills)) {
+          roleSkillsForResult = raw as unknown as RoleSkillRequirement;
+        }
+      } catch { roleSkillsForResult = null; }
     }
 
     if (interview.status !== "Done") {
@@ -639,7 +773,8 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
           company: interview.targetCompany,
           targetSkill: interview.targetSkill,
           selfAssessedLevel: interview.selfAssessedLevel,
-          roleSkills,
+          roleSkills: roleSkillsForResult,
+          resumeContext: resumeContextForResult,
         },
       );
 
@@ -672,7 +807,7 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
         targetRole: interview.targetRole,
         targetCompany: interview.targetCompany,
         selfAssessedLevel: interview.selfAssessedLevel,
-        roleSkills,
+        roleSkills: roleSkillsForResult,
         transcript: interview.conversations.map((conversation) => ({
           type: conversation.type,
           content: conversation.message,
@@ -691,7 +826,7 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
       targetRole: interview.targetRole,
       targetCompany: interview.targetCompany,
       selfAssessedLevel: interview.selfAssessedLevel,
-      roleSkills,
+      roleSkills: roleSkillsForResult,
 
       transcript: interview.conversations.map((conversation) => ({
         type: conversation.type,
