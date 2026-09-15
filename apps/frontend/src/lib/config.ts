@@ -15,7 +15,5 @@ export const BACKEND_URL = (
 ).replace(/\/$/, "");
 
 /** API origin from PUBLIC_BACKEND_URL. Trailing slashes are stripped. */
-export const BACKEND_URL = (
-  readPublicEnv("PUBLIC_BACKEND_URL") ?? "http://localhost:3001"
-).replace(/\/$/, "");
+
 
