@@ -19,6 +19,7 @@ import {
   coveredTopics,
   determineInterviewStage,
   generateRoleSkills,
+  getDifficultyTargets,
   parseInterviewDecision,
   questionCount,
   type RoleSkillRequirement,
@@ -328,7 +329,8 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       }
     }
 
-    const stage = determineInterviewStage(0);
+    const targets = getDifficultyTargets(interview.difficulty);
+    const stage = determineInterviewStage(0, interview.difficulty);
 
     const aiResponse = await askOmniRoute([
       {
@@ -355,7 +357,9 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           firstTurn: true,
           targetRole: interview.targetRole ?? undefined,
           targetCompany: interview.targetCompany ?? undefined,
+          difficulty: interview.difficulty,
           currentStage: stage,
+          questionCount: 1,
         }),
       },
     ]);
@@ -393,6 +397,8 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       skillAssessed: decision.skillAssessed,
       stage: decision.stage || stage,
       answerQuality: decision.answerQuality,
+      minQuestions: targets.minQuestions,
+      maxQuestions: targets.maxQuestions,
     });
   } catch (error) {
     console.error("Interview start error:", error);
@@ -466,8 +472,45 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       }
     }
 
+    const targets = getDifficultyTargets(interview.difficulty);
     const currentQuestionCount = questionCount(interview.conversations);
-    const stage = determineInterviewStage(currentQuestionCount);
+
+    // Hard stopping condition: If candidate has already answered the maximum questions for their level,
+    // finalize cleanly and stop generating new questions.
+    if (currentQuestionCount >= targets.maxQuestions) {
+      await prisma.interview.update({
+        where: { id: interview.id },
+        data: {
+          status: "Done",
+          completedAt: new Date(),
+        },
+      });
+
+      res.json({
+        message:
+          "Thank you for sharing your background and answering our technical questions today. That concludes our interview! Let's review your performance summary.",
+        difficulty: interview.difficulty,
+        topic: "Interview Conclusion",
+        followUp: false,
+        finished: true,
+        questionType: "wrap-up",
+        skillAssessed: "Interview Conclusion",
+        stage: "stage_8_wrap_up",
+        answerQuality: "strong",
+        minQuestions: targets.minQuestions,
+        maxQuestions: targets.maxQuestions,
+      });
+      return;
+    }
+
+    const isNearEnd = currentQuestionCount >= targets.maxQuestions - 1;
+    const stage = isNearEnd
+      ? "stage_8_wrap_up"
+      : determineInterviewStage(currentQuestionCount, interview.difficulty);
+
+    const previousAssistantMessages = interview.conversations.filter(
+      (item) => item.type === "Assistant",
+    );
 
     const aiResponse = await askOmniRoute([
       {
@@ -483,9 +526,7 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
           questionCount: currentQuestionCount,
           coveredTopics: coveredTopics(interview.conversations),
           durationMinutes: interview.duration,
-          previousQuestions: interview.conversations
-            .filter((item) => item.type === "Assistant")
-            .map((item) => item.message),
+          previousQuestions: previousAssistantMessages.map((item) => item.message),
           currentStage: stage,
         }),
       },
@@ -494,7 +535,9 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
         content: buildTurnInstruction({
           messages: interview.conversations,
           latestAnswer: message,
+          difficulty: interview.difficulty,
           currentStage: stage,
+          questionCount: currentQuestionCount + 1,
         }),
       },
     ]);
@@ -504,6 +547,9 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
     }
 
     const decision = parseInterviewDecision(aiResponse, interview.difficulty, stage);
+
+    // If hard max will be reached on this turn or decision finished:
+    const isFinished = decision.finished === true || (isNearEnd && decision.questionType === "wrap-up");
 
     // Save AI response
     await prisma.message.create({
@@ -517,8 +563,9 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
     await prisma.interview.update({
       where: { id: interview.id },
       data: {
-        status: "InProgress",
+        status: isFinished ? "Done" : "InProgress",
         difficulty: decision.difficulty,
+        completedAt: isFinished ? new Date() : undefined,
       },
     });
 
@@ -527,11 +574,15 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       difficulty: decision.difficulty,
       topic: decision.topic,
       followUp: decision.followUp,
-      finished: decision.finished,
+      finished: isFinished,
       questionType: decision.questionType,
       skillAssessed: decision.skillAssessed,
       stage: decision.stage || stage,
       answerQuality: decision.answerQuality,
+      hintGiven: decision.hintGiven ?? false,
+      hint: decision.hint,
+      minQuestions: targets.minQuestions,
+      maxQuestions: targets.maxQuestions,
     });
   } catch (error) {
     console.error("Interview response error:", error);

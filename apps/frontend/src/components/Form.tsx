@@ -169,48 +169,55 @@ export function Form() {
       case "core":
       case "high":
         return (
-          <span className="inline-flex items-center rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400 border border-amber-500/20">
+          <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200">
             Core Requirement
           </span>
         );
       case "important":
       case "medium":
         return (
-          <span className="inline-flex items-center rounded-md bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400 border border-blue-500/20">
+          <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800 border border-blue-200">
             Important
           </span>
         );
       case "bonus":
         return (
-          <span className="inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/20">
+          <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 border border-emerald-200">
             Bonus / Differentiator
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary border border-primary/20">
+          <span className="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-800 border border-indigo-200">
             Recommended
           </span>
         );
     }
   }
 
+  const expectedQuestions =
+    level === "Beginner"
+      ? "8–9 questions"
+      : level === "Advanced"
+        ? "15–20 questions"
+        : "10–11 questions";
+
   return (
-    <main className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-8 sm:py-10">
+    <main className="relative min-h-screen bg-background px-5 py-8 sm:px-8 sm:py-10">
       <AppHeader />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 pt-16 sm:pt-20">
         <section className="max-w-2xl">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground shadow-2xs">
             <Mic className="size-3.5 text-primary" />
-            Voice-based technical interview
+            AI Voice Interview Platform
           </div>
-          <h1 className="bg-linear-to-b from-foreground to-foreground/60 bg-clip-text text-4xl font-bold tracking-tight text-transparent sm:text-5xl">
-            AI Interview Kickstart
+          <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
+            Technical Interview Kickstart
           </h1>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+          <p className="mt-3 max-w-xl text-base leading-relaxed text-muted-foreground">
             {step === 1
-              ? "Set your target role and self-assessment. Our AI will analyze the role requirements before you begin."
-              : "Review the required competencies determined for this role before beginning the live voice session."}
+              ? "Specify your target role, company, and seniority. Our adaptive AI interviewer prepares a tailored, conversational assessment calibrated to your level."
+              : `Review the recommended evaluation framework (${expectedQuestions} total) before beginning your live voice interview.`}
           </p>
         </section>
 

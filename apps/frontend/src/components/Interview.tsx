@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -38,6 +38,11 @@ type InterviewContext = {
   selfAssessedLevel?: string;
   questionType?: string;
   skillAssessed?: string;
+};
+
+type ConversationTurn = {
+  role: "ai" | "user";
+  text: string;
 };
 
 type DiagnosticState = {
@@ -182,6 +187,9 @@ export function Interview() {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [questionNumber, setQuestionNumber] = useState(1);
+  const [minQuestions, setMinQuestions] = useState<number | null>(null);
+  const [maxQuestions, setMaxQuestions] = useState<number | null>(null);
+  const [conversationLog, setConversationLog] = useState<ConversationTurn[]>([]);
 
   const [diagnostics, setDiagnostics] = useState<DiagnosticState>({
     micPermission: "unknown",
@@ -868,7 +876,12 @@ export function Interview() {
 
         setQuestion(data.message ?? "");
         setContext(data);
-        if (data.message) speakAI(data.message);
+        if ((data as any).minQuestions) setMinQuestions((data as any).minQuestions);
+        if ((data as any).maxQuestions) setMaxQuestions((data as any).maxQuestions);
+        if (data.message) {
+          setConversationLog((prev) => [...prev, { role: "ai", text: data.message! }]);
+          speakAI(data.message);
+        }
         if (isCurrentSession() && !window.speechSynthesis.speaking) {
           setStatus("listening");
         }
@@ -918,6 +931,7 @@ export function Interview() {
     setMicrophoneMuted(true);
     updateStatus("submitting");
     setSubmittedAnswer(answer);
+    setConversationLog((prev) => [...prev, { role: "user", text: answer }]);
     updateDraft("");
     setInterimTranscript("");
     userEditedRef.current = false;
@@ -940,6 +954,9 @@ export function Interview() {
       const nextQuestion = response.data.message as string;
       setQuestion(nextQuestion);
       setQuestionNumber((prev) => prev + 1);
+      if (response.data.minQuestions) setMinQuestions(response.data.minQuestions);
+      if (response.data.maxQuestions) setMaxQuestions(response.data.maxQuestions);
+      if (nextQuestion) setConversationLog((prev) => [...prev, { role: "ai", text: nextQuestion }]);
 
       if (response.data.questionType || response.data.skillAssessed || response.data.difficulty) {
         setContext((prev) => ({
@@ -1055,7 +1072,7 @@ export function Interview() {
     if (status === "listening") {
       return {
         label: "LISTENING",
-        desc: "Microphone active • Speak your answer",
+        desc: "Microphone active â€¢ Speak your answer",
         badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
         dot: "bg-emerald-400",
       };
@@ -1077,404 +1094,169 @@ export function Interview() {
 
   const assessment = getPipelineAssessment(diagnostics);
 
+  // Transcript panel scroll ref
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [conversationLog]);
+
   return (
-    <main className="flex min-h-screen flex-col px-5 py-5 sm:px-8">
-      <header className="mx-auto flex w-full max-w-5xl items-center justify-between border-b border-border pb-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-            AI interview
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {hasConfiguration
-              ? `${context.targetRole || "Role"} • ${context.targetCompany || "Standard"}`
-              : "Technical assessment"}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Reconnect Voice manual button if disconnected */}
-          {(diagnostics.deepgramStatus !== "connected" ||
-            status === "error") && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                reconnectAttemptsRef.current = 0;
-                void reconnectVoice();
-              }}
-              disabled={isReconnecting}
-              className="gap-1.5 text-xs border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
-            >
-              {isReconnecting ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <RefreshCw className="size-3" />
-              )}
-              {isReconnecting ? "Reconnecting..." : "Reconnect Voice"}
-            </Button>
-          )}
-
-          <div className="flex items-center gap-2 text-xs font-medium">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${voiceState.badge}`}
-            >
-              <span className={`size-2 rounded-full ${voiceState.dot}`} />
-              {voiceState.label}
-            </span>
-          </div>
-        </div>
-      </header>
-
-      {/* Real-time Hardware & Connection Pipeline Status Bar */}
-      <div className="mx-auto mt-4 w-full max-w-5xl rounded-lg border border-border/80 bg-card/40 px-4 py-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-            <span className="flex items-center gap-1.5">
-              <span
-                className={`size-2 rounded-full ${
-                  diagnostics.micPermission === "granted" &&
-                  diagnostics.micDeviceDetected
-                    ? "bg-emerald-400"
-                    : diagnostics.micPermission === "denied"
-                      ? "bg-destructive"
-                      : "bg-amber-400"
-                }`}
-              />
-              <span className="text-muted-foreground">Microphone:</span>
-              <span className="font-medium text-foreground">
-                {diagnostics.micPermission === "granted"
-                  ? "Ready"
-                  : diagnostics.micPermission === "denied"
-                    ? "Blocked"
-                    : "Connecting…"}
-              </span>
-            </span>
-
-            <span className="flex items-center gap-1.5">
-              <span
-                className={`size-2 rounded-full ${
-                  diagnostics.deepgramStatus === "connected"
-                    ? "bg-emerald-400"
-                    : diagnostics.deepgramStatus === "error"
-                      ? "bg-destructive"
-                      : "bg-amber-400"
-                }`}
-              />
-              <span className="text-muted-foreground">Voice Connection:</span>
-              <span className="font-medium text-foreground capitalize">
-                {diagnostics.deepgramStatus === "connected"
-                  ? "Connected (Nova-3)"
-                  : diagnostics.deepgramStatus}
-              </span>
-            </span>
-
-            <span className="flex items-center gap-1.5">
-              <span
-                className={`size-2 rounded-full ${
-                  diagnostics.chunksSent > 0
-                    ? "bg-emerald-400"
-                    : "bg-muted-foreground/40"
-                }`}
-              />
-              <span className="text-muted-foreground">Audio:</span>
-              <span className="font-medium text-foreground">
-                {diagnostics.chunksSent > 0
-                  ? `Active (${diagnostics.chunksSent} chunks)`
-                  : "Waiting for speech…"}
-              </span>
-            </span>
-
-            <span className="flex items-center gap-1.5">
-              <span
-                className={`size-2 rounded-full ${
-                  diagnostics.transcriptStatus === "received"
-                    ? "bg-emerald-400"
-                    : diagnostics.transcriptStatus === "receiving"
-                      ? "bg-cyan-400"
-                      : "bg-muted-foreground/40"
-                }`}
-              />
-              <span className="text-muted-foreground">Transcript:</span>
-              <span className="font-medium text-foreground">
-                {diagnostics.transcriptStatus === "received"
-                  ? "Received"
-                  : diagnostics.transcriptStatus === "receiving"
-                    ? "Transcribing…"
-                    : "Waiting…"}
-              </span>
-            </span>
-          </div>
-
+    <main className="flex min-h-screen flex-col bg-background">
+      {/* â”€â”€ Top Bar â”€â”€ */}
+      <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowDiagnostics((prev) => !prev)}
-              className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
-              <Activity className="size-3 text-primary" />
-              Diagnostics
-              {showDiagnostics ? (
-                <ChevronUp className="size-3" />
-              ) : (
-                <ChevronDown className="size-3" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Collapsible Diagnostics Details Panel */}
-        {showDiagnostics && (
-          <div className="mt-3 border-t border-border/60 pt-3">
-            <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-md border border-border/50 bg-background/50 p-2.5">
-                <span className="text-muted-foreground">Permission:</span>{" "}
-                <span
-                  className={`font-medium ${
-                    diagnostics.micPermission === "granted"
-                      ? "text-emerald-400"
-                      : diagnostics.micPermission === "denied"
-                        ? "text-destructive"
-                        : "text-amber-400"
-                  }`}
-                >
-                  {diagnostics.micPermission}
-                </span>
-              </div>
-              <div className="rounded-md border border-border/50 bg-background/50 p-2.5">
-                <span className="text-muted-foreground">Device:</span>{" "}
-                <span className="font-medium text-foreground">
-                  {diagnostics.micDeviceLabel ||
-                    (diagnostics.micDeviceDetected
-                      ? "Detected"
-                      : "Not detected")}
-                </span>
-              </div>
-              <div className="rounded-md border border-border/50 bg-background/50 p-2.5">
-                <span className="text-muted-foreground">Audio Track:</span>{" "}
-                <span
-                  className={`font-medium ${
-                    diagnostics.audioTrackStatus === "live"
-                      ? "text-emerald-400"
-                      : "text-amber-400"
-                  }`}
-                >
-                  {diagnostics.audioTrackStatus}
-                </span>
-              </div>
-              <div className="rounded-md border border-border/50 bg-background/50 p-2.5">
-                <span className="text-muted-foreground">Recorder:</span>{" "}
-                <span className="font-medium text-foreground capitalize">
-                  {diagnostics.recorderStatus}{" "}
-                  {diagnostics.recorderMimeType &&
-                    `(${diagnostics.recorderMimeType})`}
-                </span>
-              </div>
-              <div className="rounded-md border border-border/50 bg-background/50 p-2.5">
-                <span className="text-muted-foreground">Audio Chunks:</span>{" "}
-                <span className="font-medium text-foreground">
-                  {diagnostics.chunksSent} sent{" "}
-                  {diagnostics.lastChunkTime &&
-                    `(@ ${diagnostics.lastChunkTime})`}
-                </span>
-              </div>
-              <div className="rounded-md border border-border/50 bg-background/50 p-2.5">
-                <span className="text-muted-foreground">Deepgram:</span>{" "}
-                <span
-                  className={`font-medium ${
-                    diagnostics.deepgramStatus === "connected"
-                      ? "text-emerald-400"
-                      : "text-destructive"
-                  }`}
-                >
-                  {diagnostics.deepgramStatus}
-                </span>
-              </div>
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+              <Bot className="size-4 text-primary" />
             </div>
-
-            <div
-              className={`mt-2.5 rounded-md border px-3 py-2 text-xs flex items-start gap-2 ${
-                assessment.tone === "healthy"
-                  ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300"
-                  : assessment.tone === "warning"
-                    ? "border-amber-500/30 bg-amber-500/5 text-amber-300"
-                    : "border-destructive/40 bg-destructive/10 text-destructive"
-              }`}
-            >
-              {assessment.tone === "healthy" ? (
-                <Check className="size-3.5 mt-0.5 shrink-0 text-emerald-400" />
-              ) : (
-                <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
-              )}
-              <div className="flex-1">
-                <span className="font-semibold">{assessment.stage}:</span>{" "}
-                {assessment.advice}
-              </div>
-              {diagnostics.deepgramStatus !== "connected" && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    reconnectAttemptsRef.current = 0;
-                    void reconnectVoice();
-                  }}
-                  disabled={isReconnecting}
-                  className="h-6 px-2 text-[11px] shrink-0"
-                >
-                  Reconnect
-                </Button>
-              )}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary leading-none">AI Interview</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {context.targetRole
+                  ? `${context.targetRole}${context.targetCompany ? ` Â· ${context.targetCompany}` : ""}`
+                  : "Technical Assessment"}
+              </p>
             </div>
           </div>
-        )}
-      </div>
 
-      <div className="mx-auto grid w-full max-w-5xl flex-1 gap-6 py-6 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
-        <section className="order-2 flex flex-col gap-5 lg:order-1">
-          <div className="rounded-2xl border border-border bg-card/60 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
-                  Question {questionNumber}
-                </span>
-                {context.selfAssessedLevel && (
-                  <span className="rounded-md border border-border bg-background/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                    {context.selfAssessedLevel}
-                  </span>
-                )}
-                {context.questionType && (
-                  <span className="rounded-md border border-border bg-background/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground capitalize">
-                    {context.questionType}
-                  </span>
-                )}
-              </div>
-              {context.skillAssessed && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary border border-primary/20">
-                  <Sparkles className="size-3" />
-                  {context.skillAssessed}
+          {/* Question Progress */}
+          <div className="hidden sm:flex flex-col items-center gap-1">
+            <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+              <span>Question {questionNumber}</span>
+              {maxQuestions && (
+                <span className="text-muted-foreground">of ~{maxQuestions}</span>
+              )}
+              {context.selfAssessedLevel && (
+                <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {context.selfAssessedLevel}
                 </span>
               )}
             </div>
-            <p className="mt-3 text-lg leading-relaxed font-normal">
-              {question || "Generating your first question…"}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card/60 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
-                  Your Answer
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {aiSpeaking
-                    ? "Microphone paused while the interviewer speaks."
-                    : status === "submitting"
-                      ? "Answer submitted. Analyzing and preparing the next question…"
-                      : "Review and edit your transcript before submitting."}
-                </p>
-              </div>
-              <span className="text-xs font-medium text-muted-foreground">
-                {draft.length} chars
-              </span>
-            </div>
-
-            <textarea
-              value={draft}
-              onChange={(event) => {
-                userEditedRef.current = true;
-                updateDraft(event.target.value);
-                setInterimTranscript("");
-              }}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  void submitAnswer();
-                }
-              }}
-              disabled={!editableStatuses.includes(status) || aiSpeaking}
-              placeholder="Your voice transcription will appear here in real time. You can edit this text anytime before submitting..."
-              className="mt-4 min-h-32 w-full resize-y rounded-lg border border-input bg-background px-3.5 py-3 text-sm leading-relaxed outline-none transition focus:border-ring focus:ring-[3px] focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-60"
-            />
-
-            {interimTranscript && (
-              <div className="mt-2 flex items-center gap-2 rounded-md bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-300 border border-cyan-500/20">
-                <span className="size-2 rounded-full bg-cyan-400 animate-ping" />
-                <span className="font-medium">Live speech:</span>
-                <span className="italic truncate">{interimTranscript}</span>
+            {maxQuestions && (
+              <div className="h-1 w-40 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-700"
+                  style={{ width: `${Math.min(100, (questionNumber / maxQuestions) * 100)}%` }}
+                />
               </div>
             )}
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${voiceState.badge}`}>
-                  <span className={`size-2 rounded-full ${voiceState.dot}`} />
-                  {voiceState.label}
-                </span>
-                <span className="text-xs text-muted-foreground hidden sm:inline">
-                  {voiceState.desc}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {draft.trim() && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      userEditedRef.current = false;
-                      updateDraft("");
-                      setInterimTranscript("");
-                    }}
-                    disabled={!editableStatuses.includes(status) || aiSpeaking}
-                    className="text-xs text-muted-foreground hover:text-foreground h-8"
-                  >
-                    Clear Text
-                  </Button>
-                )}
-                <Button
-                  onClick={() => void submitAnswer()}
-                  disabled={
-                    !draft.trim() ||
-                    !editableStatuses.includes(status) ||
-                    aiSpeaking
-                  }
-                  className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-                >
-                  <Send className="size-4" />
-                  Submit Answer
-                </Button>
-              </div>
-            </div>
           </div>
 
-          {submittedAnswer && (
-            <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-muted-foreground">
-              <Check className="mt-0.5 size-4 text-emerald-400" />
-              Previous answer submitted. The next response is being evaluated.
-            </div>
-          )}
-
-          {error && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              <span>{error}</span>
+          {/* Connection Status + Controls */}
+          <div className="flex items-center gap-2">
+            {(diagnostics.deepgramStatus !== "connected" || status === "error") && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  reconnectAttemptsRef.current = 0;
-                  void reconnectVoice();
-                }}
+                onClick={() => { reconnectAttemptsRef.current = 0; void reconnectVoice(); }}
                 disabled={isReconnecting}
-                className="h-7 text-xs border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
+                className="gap-1.5 text-xs border-amber-500/40 text-amber-600 hover:bg-amber-500/10"
               >
-                Reconnect Voice
+                {isReconnecting ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                {isReconnecting ? "Reconnectingâ€¦" : "Reconnect Voice"}
               </Button>
+            )}
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${voiceState.badge}`}>
+              <span className={`size-1.5 rounded-full ${voiceState.dot}`} />
+              {voiceState.label}
+            </span>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={endInterview}
+              disabled={status === "ending"}
+              className="gap-1.5 text-xs"
+            >
+              {status === "ending" ? <Loader2 className="size-3 animate-spin" /> : <PhoneOff className="size-3" />}
+              End
+            </Button>
+          </div>
+        </div>
+
+        {/* Pipeline status mini-bar */}
+        <div className="border-t border-border/60 bg-muted/40">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 overflow-x-auto px-5 py-1.5 sm:px-8">
+            <div className="flex shrink-0 items-center gap-5 text-[11px]">
+              <span className="flex items-center gap-1.5">
+                <span className={`size-1.5 rounded-full ${
+                  diagnostics.micPermission === "granted" && diagnostics.micDeviceDetected ? "bg-emerald-500" :
+                  diagnostics.micPermission === "denied" ? "bg-destructive" : "bg-amber-400"
+                }`} />
+                <span className="text-muted-foreground">Mic:</span>
+                <span className="font-medium">{diagnostics.micPermission === "granted" ? "Ready" : diagnostics.micPermission === "denied" ? "Blocked" : "Connectingâ€¦"}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className={`size-1.5 rounded-full ${
+                  diagnostics.deepgramStatus === "connected" ? "bg-emerald-500" :
+                  diagnostics.deepgramStatus === "error" ? "bg-destructive" : "bg-amber-400"
+                }`} />
+                <span className="text-muted-foreground">STT:</span>
+                <span className="font-medium">{diagnostics.deepgramStatus === "connected" ? "Nova-3 Live" : diagnostics.deepgramStatus}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className={`size-1.5 rounded-full ${diagnostics.chunksSent > 0 ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+                <span className="text-muted-foreground">Audio:</span>
+                <span className="font-medium">{diagnostics.chunksSent > 0 ? `${diagnostics.chunksSent} chunks` : "Waitingâ€¦"}</span>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDiagnostics((p) => !p)}
+              className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Activity className="size-3 text-primary" />
+              Diagnostics
+              {showDiagnostics ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+            </button>
+          </div>
+
+          {/* Collapsible diagnostics */}
+          {showDiagnostics && (
+            <div className="mx-auto max-w-6xl border-t border-border/60 px-5 pb-3 pt-2 sm:px-8">
+              <div className="grid gap-2 text-[11px] sm:grid-cols-3">
+                <div className="rounded-md border border-border/50 bg-background/50 p-2">
+                  <span className="text-muted-foreground">Permission:</span>{" "}
+                  <span className={`font-medium ${
+                    diagnostics.micPermission === "granted" ? "text-emerald-600" :
+                    diagnostics.micPermission === "denied" ? "text-destructive" : "text-amber-600"
+                  }`}>{diagnostics.micPermission}</span>
+                </div>
+                <div className="rounded-md border border-border/50 bg-background/50 p-2">
+                  <span className="text-muted-foreground">Device:</span>{" "}
+                  <span className="font-medium">{diagnostics.micDeviceLabel || (diagnostics.micDeviceDetected ? "Detected" : "Not detected")}</span>
+                </div>
+                <div className="rounded-md border border-border/50 bg-background/50 p-2">
+                  <span className="text-muted-foreground">Recorder:</span>{" "}
+                  <span className="font-medium capitalize">{diagnostics.recorderStatus}</span>
+                </div>
+              </div>
+              <div className={`mt-2 rounded-md border px-3 py-2 text-[11px] flex items-start gap-2 ${
+                assessment.tone === "healthy" ? "border-emerald-500/30 bg-emerald-50 text-emerald-700" :
+                assessment.tone === "warning" ? "border-amber-500/30 bg-amber-50 text-amber-700" :
+                "border-destructive/40 bg-red-50 text-destructive"
+              }`}>
+                {assessment.tone === "healthy" ? (
+                  <Check className="size-3.5 mt-0.5 shrink-0 text-emerald-600" />
+                ) : (
+                  <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                )}
+                <div className="flex-1">
+                  <span className="font-semibold">{assessment.stage}:</span>{" "}{assessment.advice}
+                </div>
+              </div>
             </div>
           )}
-        </section>
+        </div>
+      </header>
 
-        <section className="order-1 flex flex-col items-center gap-6 lg:order-2">
-          <div className="flex w-full items-center justify-center gap-8 sm:gap-16">
+      {/* â”€â”€ Main Two-Panel Layout â”€â”€ */}
+      <div className="mx-auto grid w-full max-w-6xl flex-1 gap-0 px-5 py-6 sm:px-8 lg:grid-cols-[1fr_380px] lg:gap-6">
+
+        {/* â”€â”€ LEFT: Interview Console â”€â”€ */}
+        <div className="flex flex-col gap-5">
+
+          {/* Voice Orbs */}
+          <div className="flex items-center justify-center gap-10 rounded-2xl border border-border bg-card/60 py-6 shadow-sm">
             <VoiceOrb
               level={aiLevel}
               speaking={aiSpeaking}
@@ -1483,6 +1265,13 @@ export function Interview() {
               icon={Bot}
               accent="violet"
             />
+            <div className="flex flex-col items-center gap-1">
+              <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${voiceState.badge}`}>
+                <span className={`size-1.5 rounded-full ${voiceState.dot}`} />
+                {voiceState.label}
+              </span>
+              <span className="text-[11px] text-muted-foreground">{voiceState.desc}</span>
+            </div>
             <VoiceOrb
               level={userLevel}
               speaking={userSpeaking}
@@ -1493,39 +1282,180 @@ export function Interview() {
             />
           </div>
 
-          {status === "requesting-microphone" ||
-          status === "connecting-deepgram" ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              {status === "requesting-microphone"
-                ? "Requesting microphone access…"
-                : "Connecting to Deepgram…"}
+          {/* Current Question Card */}
+          <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <span className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
+                Question {questionNumber}
+              </span>
+              {maxQuestions && (
+                <span className="text-xs text-muted-foreground">of ~{maxQuestions}</span>
+              )}
+              {context.questionType && (
+                <span className="rounded-md border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground capitalize">
+                  {context.questionType}
+                </span>
+              )}
+              {context.skillAssessed && (
+                <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/8 px-2 py-0.5 text-[11px] font-medium text-primary">
+                  <Sparkles className="size-3" />
+                  {context.skillAssessed}
+                </span>
+              )}
             </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {audioChunks > 0
-                ? `${audioChunks} audio chunks streamed to Deepgram`
-                : "Speak naturally, then review and edit your transcript."}
+            <p className="text-base leading-relaxed text-foreground">
+              {question || (
+                <span className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Generating your first questionâ€¦
+                </span>
+              )}
             </p>
-          )}
-        </section>
-      </div>
+          </div>
 
-      <footer className="mx-auto flex w-full max-w-5xl justify-end border-t border-border pt-4">
-        <Button
-          variant="destructive"
-          onClick={endInterview}
-          disabled={status === "ending"}
-          className="gap-2"
-        >
-          {status === "ending" ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <PhoneOff className="size-4" />
+          {/* Answer Area */}
+          <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Your Answer</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {aiSpeaking
+                    ? "Microphone paused while the interviewer speaks."
+                    : status === "submitting"
+                      ? "Submitted. Analyzing and preparing next questionâ€¦"
+                      : "Voice transcription appears below. Edit freely before submitting."}
+                </p>
+              </div>
+              <span className="text-[11px] text-muted-foreground shrink-0">{draft.length} chars</span>
+            </div>
+
+            <textarea
+              value={draft}
+              onChange={(e) => { userEditedRef.current = true; updateDraft(e.target.value); setInterimTranscript(""); }}
+              onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); void submitAnswer(); } }}
+              disabled={!editableStatuses.includes(status) || aiSpeaking}
+              placeholder="Your voice transcription appears here in real time. Edit and review before submitting. (Ctrl+Enter to submit)"
+              className="mt-1 min-h-28 w-full resize-y rounded-xl border border-input bg-background px-3.5 py-3 text-sm leading-relaxed outline-none transition-all focus:border-ring focus:ring-[3px] focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+
+            {interimTranscript && (
+              <div className="mt-2 flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-50 px-3 py-1.5 text-[11px] text-cyan-700">
+                <span className="size-1.5 rounded-full bg-cyan-500 animate-ping" />
+                <span className="font-semibold">Live speech:</span>
+                <span className="italic truncate">{interimTranscript}</span>
+              </div>
+            )}
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {status === "requesting-microphone" || status === "connecting-deepgram" ? (
+                  <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" />
+                    {status === "requesting-microphone" ? "Requesting micâ€¦" : "Connectingâ€¦"}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">
+                    {audioChunks > 0 ? `${audioChunks} audio chunks streamed` : "Speak into your microphone"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {draft.trim() && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { userEditedRef.current = false; updateDraft(""); setInterimTranscript(""); }}
+                    disabled={!editableStatuses.includes(status) || aiSpeaking}
+                    className="h-8 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Clear
+                  </Button>
+                )}
+                <Button
+                  onClick={() => void submitAnswer()}
+                  disabled={!draft.trim() || !editableStatuses.includes(status) || aiSpeaking}
+                  className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+                  size="sm"
+                >
+                  <Send className="size-3.5" />
+                  Submit Answer
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Status messages */}
+          {submittedAnswer && (
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+              <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+              Answer submitted â€” next question is being prepared.
+            </div>
           )}
-          End interview
-        </Button>
-      </footer>
+
+          {error && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-red-50 px-3 py-2 text-sm text-destructive">
+              <span>{error}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { reconnectAttemptsRef.current = 0; void reconnectVoice(); }}
+                disabled={isReconnecting}
+                className="h-7 shrink-0 text-[11px] border-destructive/30 text-destructive hover:bg-red-50"
+              >
+                Reconnect Voice
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* â”€â”€ RIGHT: Live Conversation Transcript â”€â”€ */}
+        <aside className="mt-6 flex flex-col rounded-2xl border border-border bg-card/60 shadow-sm lg:mt-0 lg:max-h-[calc(100vh-10rem)] lg:overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+            <Mic className="size-4 text-primary" />
+            <h2 className="text-xs font-bold uppercase tracking-[0.16em] text-foreground">Live Transcript</h2>
+            {conversationLog.length > 0 && (
+              <span className="ml-auto rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                {conversationLog.length} turns
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 lg:max-h-full">
+            {conversationLog.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center py-8">
+                <div className="rounded-full bg-primary/8 p-3">
+                  <Bot className="size-5 text-primary" />
+                </div>
+                <p className="text-xs text-muted-foreground">The conversation will appear here as it progresses.</p>
+              </div>
+            ) : (
+              conversationLog.map((turn, i) => (
+                <div key={i} className={`flex gap-2 ${turn.role === "ai" ? "justify-start" : "flex-row-reverse"}`}>
+                  <div className={`grid size-6 shrink-0 place-items-center rounded-full ${
+                    turn.role === "ai"
+                      ? "bg-gradient-to-br from-violet-500 to-indigo-600 text-white"
+                      : "bg-gradient-to-br from-emerald-400 to-teal-600 text-white"
+                  }`}>
+                    {turn.role === "ai" ? <Bot className="size-3" /> : <User className="size-3" />}
+                  </div>
+                  <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[11px] leading-relaxed ${
+                    turn.role === "ai"
+                      ? "rounded-tl-sm border border-border bg-white text-foreground shadow-xs"
+                      : "rounded-tr-sm bg-primary text-primary-foreground"
+                  }`}>
+                    <p className="mb-0.5 font-semibold opacity-60" style={{ fontSize: "10px" }}>
+                      {turn.role === "ai" ? "Interviewer" : "You"}
+                    </p>
+                    <p className="whitespace-pre-wrap">{turn.text}</p>
+                  </div>
+                </div>
+              ))
+            )}
+            <div ref={transcriptEndRef} />
+          </div>
+        </aside>
+      </div>
     </main>
   );
 }

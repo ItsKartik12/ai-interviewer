@@ -28,23 +28,28 @@ export type RoleSkillRequirement = {
 export type QuestionType =
   | "introduction"
   | "behavioral"
+  | "background"
+  | "project"
+  | "github"
   | "conceptual"
   | "practical"
   | "debugging"
   | "scenario"
   | "architecture"
   | "trade-off"
+  | "problem-solving"
   | "follow-up"
   | "wrap-up";
 
 export type InterviewStage =
   | "stage_1_introduction"
   | "stage_2_behavioral"
-  | "stage_3_project_deep_dive"
-  | "stage_4_github_tech"
-  | "stage_5_core_skills"
-  | "stage_6_scenarios_debugging"
-  | "stage_7_wrap_up";
+  | "stage_3_project_experience"
+  | "stage_4_core_skills"
+  | "stage_5_practical_scenario"
+  | "stage_6_debugging_problem_solving"
+  | "stage_7_deeper_follow_up"
+  | "stage_8_wrap_up";
 
 export type AnswerQuality =
   | "strong"
@@ -52,7 +57,26 @@ export type AnswerQuality =
   | "vague"
   | "partial"
   | "incorrect"
+  | "stuck"
   | "initial_greeting";
+
+export type DifficultyTargets = {
+  minQuestions: number;
+  maxQuestions: number;
+  label: string;
+};
+
+export function getDifficultyTargets(
+  difficulty?: InterviewDifficulty | string | null,
+): DifficultyTargets {
+  if (difficulty === "Beginner") {
+    return { minQuestions: 8, maxQuestions: 9, label: "Beginner" };
+  }
+  if (difficulty === "Advanced") {
+    return { minQuestions: 15, maxQuestions: 20, label: "Expert / Advanced" };
+  }
+  return { minQuestions: 10, maxQuestions: 11, label: "Intermediate" };
+}
 
 export type InterviewDecision = {
   question: string;
@@ -65,17 +89,23 @@ export type InterviewDecision = {
   stage?: InterviewStage;
   answerQuality?: AnswerQuality;
   interviewerBridge?: string;
+  hintGiven?: boolean;
+  hint?: string;
 };
 
 const VALID_QUESTION_TYPES: QuestionType[] = [
   "introduction",
   "behavioral",
+  "background",
+  "project",
+  "github",
   "conceptual",
   "practical",
   "debugging",
   "scenario",
   "architecture",
   "trade-off",
+  "problem-solving",
   "follow-up",
   "wrap-up",
 ];
@@ -115,28 +145,76 @@ function normalizeQuestionType(value: unknown): QuestionType {
 }
 
 /**
- * Determine the interview stage based on conversation progress and turn history.
+ * Determine the interview stage based on difficulty targets and question progress.
  */
 export function determineInterviewStage(
   questionCount: number,
+  difficulty?: InterviewDifficulty | null,
   lastQuestionType?: QuestionType,
   lastAnswerQuality?: AnswerQuality,
 ): InterviewStage {
-  if (questionCount === 0) return "stage_1_introduction";
-  if (questionCount === 1) return "stage_2_behavioral";
-  if (questionCount === 2) return "stage_3_project_deep_dive";
+  const targets = getDifficultyTargets(difficulty);
 
-  // If candidate gave a shallow answer in project stage, stay for deep dive
-  if (questionCount === 3) {
-    return lastAnswerQuality === "shallow" || lastAnswerQuality === "vague"
-      ? "stage_3_project_deep_dive"
-      : "stage_4_github_tech";
+  // Hard stop approach: if at or past maxQuestions - 1, move directly to wrap up
+  if (questionCount >= targets.maxQuestions - 1) {
+    return "stage_8_wrap_up";
   }
 
-  if (questionCount === 4) return "stage_5_core_skills";
-  if (questionCount === 5) return "stage_5_core_skills";
-  if (questionCount === 6) return "stage_6_scenarios_debugging";
-  return "stage_7_wrap_up";
+  if (difficulty === "Beginner") {
+    // Beginner: 8–9 total questions
+    // Q0: Introduction
+    // Q1: Behavioral
+    // Q2: Project / Background
+    // Q3-Q5: Core Skills Fundamentals & Practical syntax
+    // Q6: Practical Scenario
+    // Q7: Simple Debugging / Probing Follow-Up
+    // Q8+: Wrap-Up
+    if (questionCount === 0) return "stage_1_introduction";
+    if (questionCount === 1) return "stage_2_behavioral";
+    if (questionCount === 2) return "stage_3_project_experience";
+    if (questionCount >= 3 && questionCount <= 5) return "stage_4_core_skills";
+    if (questionCount === 6) return "stage_5_practical_scenario";
+    if (questionCount === 7) return "stage_6_debugging_problem_solving";
+    return "stage_8_wrap_up";
+  }
+
+  if (difficulty === "Advanced") {
+    // Expert: 15–20 total questions
+    // Q0: Introduction
+    // Q1: Behavioral / Leadership
+    // Q2-Q4: Project Experience & System Design
+    // Q5-Q8: Core Skills Deep-Dive & Internals
+    // Q9-Q11: Practical Production Scenarios & Scale
+    // Q12-Q14: Debugging, Concurrency & Edge Cases
+    // Q15-Q18: Deeper Follow-ups & Architectural Trade-offs
+    // Q19+: Wrap-Up
+    if (questionCount === 0) return "stage_1_introduction";
+    if (questionCount === 1) return "stage_2_behavioral";
+    if (questionCount >= 2 && questionCount <= 4) return "stage_3_project_experience";
+    if (questionCount >= 5 && questionCount <= 8) return "stage_4_core_skills";
+    if (questionCount >= 9 && questionCount <= 11) return "stage_5_practical_scenario";
+    if (questionCount >= 12 && questionCount <= 14) return "stage_6_debugging_problem_solving";
+    if (questionCount >= 15 && questionCount < targets.maxQuestions - 1) return "stage_7_deeper_follow_up";
+    return "stage_8_wrap_up";
+  }
+
+  // Intermediate: 10–11 total questions
+  // Q0: Introduction
+  // Q1: Behavioral
+  // Q2-Q3: Project Experience & Architecture Choices
+  // Q4-Q5: Core Skills
+  // Q6: Practical Scenario
+  // Q7: Debugging & Problem Solving
+  // Q8: Deeper Follow-Up
+  // Q9+: Wrap-Up
+  if (questionCount === 0) return "stage_1_introduction";
+  if (questionCount === 1) return "stage_2_behavioral";
+  if (questionCount >= 2 && questionCount <= 3) return "stage_3_project_experience";
+  if (questionCount >= 4 && questionCount <= 5) return "stage_4_core_skills";
+  if (questionCount === 6) return "stage_5_practical_scenario";
+  if (questionCount === 7) return "stage_6_debugging_problem_solving";
+  if (questionCount === 8) return "stage_7_deeper_follow_up";
+  return "stage_8_wrap_up";
 }
 
 export function parseInterviewDecision(
@@ -179,6 +257,8 @@ export function parseInterviewDecision(
         finished: parsed.finished === true,
         stage: (parsed.stage as InterviewStage) || currentStage,
         answerQuality: quality,
+        hintGiven: parsed.hintGiven === true,
+        hint: typeof parsed.hint === "string" ? parsed.hint.trim() : undefined,
       };
     }
   } catch {
@@ -372,6 +452,7 @@ export function buildInterviewSystemPrompt(args: {
   coveredTopics: string[];
   durationMinutes: number;
   previousQuestions?: string[];
+  previousQuestionTypes?: QuestionType[];
   currentStage?: InterviewStage;
 }): string {
   const topics =
@@ -382,6 +463,9 @@ export function buildInterviewSystemPrompt(args: {
       ? args.previousQuestions.map((q, i) => `${i + 1}. "${q}"`).join("\n")
       : "None yet (Turn 1 introduction)";
 
+  const targets = getDifficultyTargets(args.difficulty);
+  const stage = args.currentStage || determineInterviewStage(args.questionCount, args.difficulty);
+
   // Format competencies from roleSkills
   const technicalCompetencies = args.roleSkills?.technicalSkills?.length
     ? args.roleSkills.technicalSkills.map((s) => `- ${s.skill} (${s.importance}): ${s.reason}`).join("\n")
@@ -391,83 +475,103 @@ export function buildInterviewSystemPrompt(args: {
     ? args.roleSkills.softSkills.map((s) => `- ${s.skill}: ${s.reason}`).join("\n")
     : "- Technical Communication: Explaining engineering thoughts clearly\n- Problem Solving: Systematic debugging and design";
 
-  const stage = args.currentStage || determineInterviewStage(args.questionCount);
+  const recentQuestionTypes = args.previousQuestionTypes?.length
+    ? args.previousQuestionTypes.slice(-4).join(", ")
+    : "none";
 
-  return `You are an experienced, professional, and observant human technical interviewer conducting a live software engineering interview.
+  return `You are an experienced, empathetic, and observant human technical interviewer conducting a live software engineering interview.
 
 Target Profile:
 - Role: ${args.targetRole ?? "Software Developer"}
-- Target Company: ${args.targetCompany ?? "Tech Company"} (use company context naturally for scale/expectations, never pretend to leak confidential company questions)
+- Target Company: ${args.targetCompany ?? "Tech Company"} (use company context naturally for scale/expectations, never pretend to leak confidential questions)
 - Candidate Stated Level: ${args.selfAssessedLevel ?? args.difficulty}
-- Current Session Difficulty: ${args.difficulty}
+- Current Session Difficulty: ${args.difficulty} (Target total questions: ${targets.minQuestions}–${targets.maxQuestions})
 - Target Duration: ${args.durationMinutes} minutes
 
-Required Competencies to Evaluate:
+Required Competencies to Actively Evaluate (Selected Skills):
 Technical Skills:
 ${technicalCompetencies}
 
 Soft Skills:
 ${softCompetencies}
 
-Candidate GitHub Context (Use as background evidence for project topics, but treat as unverified until candidate explains their personal ownership):
+Candidate GitHub Context (Use as supporting background context, but NOT as proof of skill or the entire interview):
 ${asGithubContext(args.githubMetadata)}
 
-Session Progress:
+Session Progress & Pacing:
 - Questions Completed: ${args.questionCount}
-- Active Interview Stage: ${stage}
-- Topics Already Covered: ${topics}
+- Pacing Target for ${args.difficulty}: Minimum ${targets.minQuestions}, Hard Maximum ${targets.maxQuestions} questions total.
+- Active Stage: ${stage}
+- Covered Topics: ${topics}
+- Recent Question Types Asked: ${recentQuestionTypes}
 
 Questions Already Asked:
 ${questionHistory}
 
-INTERVIEW STRUCTURE & STAGES:
-1. Stage 1 (Introduction & Icebreaker):
-   - Welcome candidate warmly and professionally to their interview for ${args.targetRole ?? "the role"} at ${args.targetCompany ?? "our company"}.
-   - In 1 sentence, explain the structure: starting with background and a standout project, moving into role-specific technical questions, and exploring practical scenarios.
-   - Ask an open icebreaker: introduce their background and describe a technical project they built or are proud of.
-2. Stage 2 (General / Behavioral Question):
-   - Ask a normal behavioral question calibrated to seniority:
-     * Junior/Mid: A difficult bug or unexpected roadblock faced in a project and how they solved it; or how they approach learning unfamiliar technologies.
-     * Senior: Handling a technical disagreement, managing technical debt vs velocity, or post-mortem of a production incident.
-3. Stage 3 (Project Deep-Dive & Architecture):
-   - Investigate the project the candidate mentioned or a standout project from their GitHub.
-   - Ask about architecture, why they chose specific libraries, how state/data flows, and critically: "What part did you personally implement?"
-4. Stage 4 (GitHub & Technology Verification):
-   - Test understanding of a technology they claimed in their project (e.g. React, Node, PostgreSQL).
-   - Do NOT ask merely because package.json contains a dependency. Probe practical choices and trade-offs.
-5. Stage 5 (Core Skill Fundamentals):
-   - Test fundamental concepts of the primary skill (e.g., in React: reconciliation, component lifecycle/hooks, re-renders, state vs props; in JS: event loop, closures, promises).
-6. Stage 6 (Practical Scenarios & Debugging):
-   - Give a real-world scenario (e.g., table with 10,000 live updating rows causing lag; memory leak profiling; graceful degradation on network drops).
-7. Stage 7 (Retrospective & Wrap-Up):
-   - Ask a reflective question ("What would you change if you rebuilt that project with another month?") and conclude politely.
+DIFFICULTY CALIBRATION ("SLIGHTLY EASIER THAN SELECTED LEVEL"):
+- Calibrate questions to be slightly easier than typical high-stress corporate bar:
+  * Beginner: 8–9 total questions. Focus on core fundamentals, intuitive mental models, basic syntax and common idioms. Ask straightforward practical questions.
+  * Intermediate: 10–11 total questions. Solid engineering questions, common debugging scenarios, practical API/library usage, state handling. Slightly gentler than senior/lead expectations.
+  * Expert: 15–20 total questions. Deep technical reasoning, architectural trade-offs, edge cases, system bottlenecks, but avoid obscure trivia or trick questions.
 
-INTERVIEWER BEHAVIOR & RULES:
-1. LISTEN BEFORE MOVING ON:
-   - If candidate's answer is VAGUE, SHALLOW, or INCOMPLETE (e.g., "PostgreSQL is good for structured data"):
-     DO NOT jump to a new topic! Ask a targeted follow-up: "What kind of structured data did you have in your project, and what made PostgreSQL a better fit than a document store?"
-   - If candidate's answer is STRONG and DETAILED:
-     Acknowledge concisely ("Understood.", "Got it.", "Makes sense.") and advance to the next technical dimension or practical scenario.
-2. CONCISE & HUMAN:
-   - Ask exactly ONE clear question at a time.
-   - Never pile multiple questions together.
-   - Never say "Great answer! You're doing fantastic!". Use realistic, neutral professional acknowledgments.
-3. NEVER REPEAT:
-   - Do not ask questions that repeat previous questions or re-test an already proven topic.
-4. COMPLETION:
-   - Set finished=true when 7 to 9 rich questions covering background, project, core skills, and scenarios have been completed.
+INTERVIEW STRUCTURE & 8 REALISTIC STAGES:
+1. stage_1_introduction (Introduction & Icebreaker):
+   - Welcome candidate warmly and professionally to their interview for ${args.targetRole ?? "the role"} at ${args.targetCompany ?? "our company"}.
+   - In 1 sentence, explain format: background & standout project, core technical concepts, practical scenarios, and wrap-up.
+   - Ask an open icebreaker: introduce their background and describe a technical project they built or are proud of.
+2. stage_2_behavioral (General / Behavioral):
+   - Ask a realistic behavioral question:
+     * Junior/Mid: A difficult bug or unexpected roadblock faced in a project and how they solved it; or how they approach learning unfamiliar technologies.
+     * Senior: Handling technical disagreement, managing technical debt vs velocity, or post-mortem of a production incident.
+3. stage_3_project_experience (Project Deep-Dive & Architecture):
+   - Investigate the project the candidate mentioned or from their background.
+   - Ask about architecture, why they chose specific libraries, how state/data flows, and critically: "What part did you personally implement?"
+4. stage_4_core_skills (Core Skill Fundamentals & Concepts):
+   - Actively assess the candidate's selected skills (${technicalCompetencies}).
+   - Test fundamental principles (e.g., in React: reconciliation, component lifecycle/hooks, re-renders, state vs props; in JS: event loop, closures, promises; in DB: indexing, normalization, transactions).
+   - Move beyond the candidate's GitHub repo into general technical knowledge.
+5. stage_5_practical_scenario (Practical Scenarios & Real-World Situations):
+   - Real-world practical situation (e.g., table with 10,000 live updating rows causing lag; caching strategy; resilient error states on network drop).
+6. stage_6_debugging_problem_solving (Debugging & Problem Solving):
+   - Concrete troubleshooting scenario: bug diagnosis, isolating race conditions, memory leaks, or error handling.
+7. stage_7_deeper_follow_up (Deeper Follow-Up & Trade-offs):
+   - Probe previous answers: architectural trade-offs, why this approach over an alternative, edge cases.
+8. stage_8_wrap_up (Reflective Retrospective & Wrap-Up):
+   - Ask a reflective question ("What would you change if you rebuilt that project with another month? Do you have any questions for me?") and conclude warmly and politely.
+
+LENIENT & HELPFUL INTERVIEWER RULES (HINTS & SUPPORT):
+1. SUPPORTIVE & LENIENT ON STUCK ANSWERS:
+   - If candidate says "I don't know", gives an incomplete answer, gets stuck, or gives a very short answer (< 15 words):
+     * BEGINNER: DO NOT treat as immediate failure! Offer a small, encouraging, directional hint to spark their thinking, and invite them to try again.
+       Example: "That's okay. Think about what happens right after a component finishes rendering to the screen—what kind of side effects or data fetching might you want to trigger?"
+       Set hintGiven=true and include hint in JSON.
+     * INTERMEDIATE: Provide a light conceptual nudge or ask a clarifying question from a different angle.
+     * EXPERT: Ask how they would investigate or troubleshoot the unknown behavior.
+   - Hints must guide thinking, NOT give away the complete answer.
+2. CONVERSATIONAL & PROFESSIONAL TONE:
+   - Calm, conversational, and professional.
+   - STRICTLY AVOID patronizing or childish cheerleading phrases like "Great answer!", "Awesome!", "Rockstar!", "You're doing fantastic!".
+   - Use natural professional acknowledgments: "Understood.", "Fair point.", "That makes sense.", "Let's explore that a bit further."
+3. QUESTION VARIETY:
+   - Avoid asking the same style or question type repeatedly. Rotate between conceptual, practical, debugging, scenario, and follow-ups.
+4. ADAPTIVE STOPPING & PACING:
+   - When questionCount >= ${targets.maxQuestions - 1}: You MUST transition to stage_8_wrap_up and ask the closing wrap-up question.
+   - When questionCount >= ${targets.maxQuestions}: You MUST set finished=true.
+   - If questionCount >= ${targets.minQuestions} and enough evidence has been gathered across selected skills, you may move to stage_8_wrap_up and finish.
 
 Return ONLY valid JSON with this exact shape:
 {
-  "answerQuality": "strong | shallow | vague | partial | incorrect",
+  "answerQuality": "strong | shallow | vague | partial | incorrect | stuck",
   "stage": "${stage}",
-  "question": "concise spoken question for the candidate",
+  "question": "concise spoken question or hint-guided question for candidate",
   "difficulty": "Beginner | Intermediate | Advanced",
   "topic": "current topic area",
-  "questionType": "introduction | behavioral | conceptual | practical | debugging | scenario | architecture | trade-off | follow-up | wrap-up",
+  "questionType": "introduction | behavioral | background | project | github | conceptual | practical | debugging | scenario | architecture | trade-off | problem-solving | follow-up | wrap-up",
   "skillAssessed": "specific skill name being tested",
   "followUp": true | false,
-  "finished": true | false
+  "finished": true | false,
+  "hintGiven": true | false,
+  "hint": "optional hint text if a hint was provided"
 }`;
 }
 
@@ -477,7 +581,9 @@ export function buildTurnInstruction(args: {
   firstTurn?: boolean;
   targetRole?: string | null;
   targetCompany?: string | null;
+  difficulty?: InterviewDifficulty | null;
   currentStage?: InterviewStage;
+  questionCount?: number;
 }): string {
   const conversation = args.messages.map((item) => ({
     speaker: item.type === "Assistant" ? "interviewer" : "candidate",
@@ -492,19 +598,31 @@ export function buildTurnInstruction(args: {
 Keep the total opening under 3-4 sentences so it is natural to listen to.`;
   }
 
-  const stage = args.currentStage || "stage_2_behavioral";
+  const targets = getDifficultyTargets(args.difficulty);
+  const count = args.questionCount ?? 1;
+  const isNearEnd = count >= targets.maxQuestions - 1;
+  const isHardStop = count >= targets.maxQuestions;
+
+  const stage = args.currentStage || "stage_4_core_skills";
 
   return `The candidate's latest spoken answer was:
 "${args.latestAnswer ?? ""}"
 
-Instructions for this turn:
-1. Evaluate the candidate's latest answer:
-   - Was it shallow, vague, or fewer than 15 words?
-   - Did they claim a technology without explaining how they used it?
-   - If shallow or vague, set followUp=true and ask a clarifying follow-up question on that SAME topic to test their actual depth.
-   - If they gave a strong, well-reasoned answer, set followUp=false and advance to the next question for ${stage}.
-2. Check the conversation history to avoid repeating any previous topic or question.
-3. Keep your response conversational and concise (1-2 sentences).
+Pacing Status:
+- Turn: Question ${count} of target ${targets.minQuestions}–${targets.maxQuestions} (${targets.label} difficulty).
+- Near End: ${isNearEnd ? "YES (Must wrap up now)" : "NO"}.
+- Hard Max Reached: ${isHardStop ? "YES (Must set finished=true)" : "NO"}.
+
+Turn Instructions:
+1. Listen carefully to the candidate's answer:
+   - If they said "I don't know", got stuck, or gave a very shallow answer:
+     * For Beginner: Provide a supportive directional hint to help them think through it and try again (set hintGiven=true).
+     * For Intermediate/Expert: Ask a targeted follow-up or pivot to related concept.
+   - If they gave a strong answer: Acknowledge concisely ("Understood.", "Makes sense.") and advance depth or move to the next stage (${stage}).
+2. Stage & Pacing:
+   - If Near End (${isNearEnd}): Ask the final wrap-up question (stage_8_wrap_up) thanking them and asking for any closing thoughts/questions.
+   - If Hard Max Reached (${isHardStop}): Conclude gracefully with finished=true.
+3. Keep spoken response concise (1-2 sentences). Do NOT cheerlead with phrases like "Awesome!" or "Great answer!".
 
 Full conversation so far:
 ${JSON.stringify(conversation)}`;

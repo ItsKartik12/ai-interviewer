@@ -15,18 +15,18 @@ interface VoiceOrbProps {
 
 const ACCENTS = {
   violet: {
-    core: "from-violet-400 to-indigo-600",
-    glow: "139, 92, 246",
-    ring: "border-violet-400/40",
-    text: "text-violet-300",
-    bars: "bg-violet-400",
+    core: "from-indigo-500 to-indigo-700",
+    glow: "99, 102, 241",
+    ring: "border-indigo-400/30",
+    text: "text-indigo-600",
+    bars: "bg-indigo-500",
   },
   emerald: {
-    core: "from-emerald-300 to-teal-600",
+    core: "from-emerald-500 to-teal-700",
     glow: "16, 185, 129",
-    ring: "border-emerald-400/40",
-    text: "text-emerald-300",
-    bars: "bg-emerald-400",
+    ring: "border-emerald-400/30",
+    text: "text-emerald-600",
+    bars: "bg-emerald-500",
   },
 } as const;
 
