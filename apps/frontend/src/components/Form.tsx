@@ -170,13 +170,12 @@ export function Form() {
   // --- Validation ---
 
   function validate(): FieldErrors {
-    return {
-      ...(role.trim() ? {} : { role: "Specify a target role." }),
-      ...(level ? {} : { level: "Choose your current level." }),
-      ...(company.trim() ? {} : { company: "Add a target company." }),
-      ...(!pdfState.parsed ? { resume: "Upload and parse your resume PDF." } : {}),
-    };
-  }
+  return {
+    ...(role.trim() ? {} : { role: "Specify a target role." }),
+    ...(level ? {} : { level: "Choose your current level." }),
+    ...(company.trim() ? {} : { company: "Add a target company." }),
+  };
+}
 
   const fieldClass = (field: Field) =>
     errors[field] ? "border-destructive focus-visible:ring-destructive/30" : "";
@@ -398,7 +397,7 @@ export function Form() {
                   <FileText className="size-4 text-muted-foreground" />
                   Resume / CV
                 </span>
-                <span className="text-xs font-semibold text-destructive">Required · PDF only · max 10 MB</span>
+                <span className="text-xs font-semibold text-destructive">Optional · PDF only · max 10 MB</span>
               </span>
 
               {!pdfState.file ? (
