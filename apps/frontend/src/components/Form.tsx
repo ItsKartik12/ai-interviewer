@@ -50,6 +50,26 @@ interface PdfState {
   error: string | null;
 }
 
+function getImportanceBadge(importance?: string) {
+  if (!importance) return null;
+  const map: Record<string, { label: string; className: string }> = {
+    core: { label: "Core", className: "bg-primary/10 text-primary border-primary/20" },
+    important: { label: "Important", className: "bg-blue-500/10 text-blue-600 border-blue-500/20" },
+    high: { label: "High", className: "bg-blue-500/10 text-blue-600 border-blue-500/20" },
+    bonus: { label: "Bonus", className: "bg-muted text-muted-foreground border-border" },
+    medium: { label: "Medium", className: "bg-amber-500/10 text-amber-600 border-amber-500/20" },
+  };
+  const entry = map[importance.toLowerCase()];
+  if (!entry) return null;
+  return (
+    <span
+      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${entry.className}`}
+    >
+      {entry.label}
+    </span>
+  );
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -101,11 +121,15 @@ export function Form() {
     setPdfState({ file, parsing: true, parsed: false, resumeContext: null, error: null });
     setErrors((current) => ({ ...current, resume: undefined }));
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const base64 = btoa(binary);
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1] ?? "");
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
       const response = await axios.post(`${BACKEND_URL}/api/v1/parse-pdf`, {
         pdfBase64: base64,
         fileName: file.name,

@@ -1102,7 +1102,7 @@ export function Interview() {
 
   return (
     <main className="flex min-h-screen flex-col bg-background">
-      {/* â”€â”€ Top Bar â”€â”€ */}
+      {/* ── Top Bar ── */}
       <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
           <div className="flex items-center gap-3">
@@ -1113,7 +1113,7 @@ export function Interview() {
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary leading-none">AI Interview</p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {context.targetRole
-                  ? `${context.targetRole}${context.targetCompany ? ` Â· ${context.targetCompany}` : ""}`
+                  ? `${context.targetRole}${context.targetCompany ? ` · ${context.targetCompany}` : ""}` 
                   : "Technical Assessment"}
               </p>
             </div>
@@ -1153,7 +1153,7 @@ export function Interview() {
                 className="gap-1.5 text-xs border-amber-500/40 text-amber-600 hover:bg-amber-500/10"
               >
                 {isReconnecting ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                {isReconnecting ? "Reconnectingâ€¦" : "Reconnect Voice"}
+                {isReconnecting ? "Reconnecting…" : "Reconnect Voice"}
               </Button>
             )}
             <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${voiceState.badge}`}>
@@ -1183,7 +1183,7 @@ export function Interview() {
                   diagnostics.micPermission === "denied" ? "bg-destructive" : "bg-amber-400"
                 }`} />
                 <span className="text-muted-foreground">Mic:</span>
-                <span className="font-medium">{diagnostics.micPermission === "granted" ? "Ready" : diagnostics.micPermission === "denied" ? "Blocked" : "Connectingâ€¦"}</span>
+                <span className="font-medium">{diagnostics.micPermission === "granted" ? "Ready" : diagnostics.micPermission === "denied" ? "Blocked" : "Connecting…"}</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className={`size-1.5 rounded-full ${
@@ -1196,7 +1196,7 @@ export function Interview() {
               <span className="flex items-center gap-1.5">
                 <span className={`size-1.5 rounded-full ${diagnostics.chunksSent > 0 ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
                 <span className="text-muted-foreground">Audio:</span>
-                <span className="font-medium">{diagnostics.chunksSent > 0 ? `${diagnostics.chunksSent} chunks` : "Waitingâ€¦"}</span>
+                <span className="font-medium">{diagnostics.chunksSent > 0 ? `${diagnostics.chunksSent} chunks` : "Waiting…"}</span>
               </span>
             </div>
             <button
@@ -1249,10 +1249,10 @@ export function Interview() {
         </div>
       </header>
 
-      {/* â”€â”€ Main Two-Panel Layout â”€â”€ */}
+      {/* ── Main Two-Panel Layout ── */}
       <div className="mx-auto grid w-full max-w-6xl flex-1 gap-0 px-5 py-6 sm:px-8 lg:grid-cols-[1fr_380px] lg:gap-6">
 
-        {/* â”€â”€ LEFT: Interview Console â”€â”€ */}
+        {/* ── LEFT: Interview Console ── */}
         <div className="flex flex-col gap-5">
 
           {/* Voice Orbs */}
@@ -1380,7 +1380,7 @@ export function Interview() {
                 {status === "requesting-microphone" || status === "connecting-deepgram" ? (
                   <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                     <Loader2 className="size-3 animate-spin" />
-                    {status === "requesting-microphone" ? "Requesting micâ€¦" : "Connectingâ€¦"}
+                    {status === "requesting-microphone" ? "Requesting mic…" : "Connecting…"}
                   </span>
                 ) : (
                   <span className="text-[11px] text-muted-foreground">
@@ -1418,7 +1418,7 @@ export function Interview() {
           {submittedAnswer && (
             <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
               <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-              Answer submitted â€” next question is being prepared.
+              Answer submitted — next question is being prepared.
             </div>
           )}
 
@@ -1438,7 +1438,7 @@ export function Interview() {
           )}
         </div>
 
-        {/* â”€â”€ RIGHT: Live Conversation Transcript â”€â”€ */}
+        {/* ── RIGHT: Live Conversation Transcript ── */}
         <aside className="mt-6 flex flex-col rounded-2xl border border-border bg-card/60 shadow-sm lg:mt-0 lg:max-h-[calc(100vh-10rem)] lg:overflow-hidden">
           <div className="flex items-center gap-2 border-b border-border px-4 py-3">
             <Mic className="size-4 text-primary" />

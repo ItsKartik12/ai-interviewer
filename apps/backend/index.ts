@@ -295,10 +295,11 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       },
     });
 
-    // Store both roleSkills and resumeContext in jobDescription JSON
+    // Store roleSkills, resumeContext, and selectedSkills in jobDescription JSON
     const jobDescriptionJson = JSON.stringify({
       roleSkills,
       resumeContext: resumeContext ?? null,
+      selectedSkills: data.selectedSkills ?? [],
     });
 
     const interview = await prisma.interview.create({
@@ -750,19 +751,9 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     let feedback = interview.feedback;
     let status = interview.status;
 
-    let roleSkillsForResult: RoleSkillRequirement | null = null;
-    let resumeContextForResult: any = null;
-    if (interview.jobDescription) {
-      try {
-        const raw = JSON.parse(interview.jobDescription) as Record<string, unknown>;
-        if (raw.roleSkills !== undefined || raw.resumeContext !== undefined) {
-          roleSkillsForResult = (raw.roleSkills as RoleSkillRequirement) ?? null;
-          resumeContextForResult = raw.resumeContext ?? null;
-        } else if (Array.isArray((raw as any).technicalSkills)) {
-          roleSkillsForResult = raw as unknown as RoleSkillRequirement;
-        }
-      } catch { roleSkillsForResult = null; }
-    }
+    const { roleSkills, resumeContext, selectedSkills } = parseJobDesc(
+      interview.jobDescription ?? null,
+    );
 
     if (interview.status !== "Done") {
       const result = await calculateResult(
@@ -772,9 +763,10 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
           role: interview.targetRole,
           company: interview.targetCompany,
           targetSkill: interview.targetSkill,
+          selectedSkills,
           selfAssessedLevel: interview.selfAssessedLevel,
-          roleSkills: roleSkillsForResult,
-          resumeContext: resumeContextForResult,
+          roleSkills,
+          resumeContext,
         },
       );
 
@@ -807,7 +799,7 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
         targetRole: interview.targetRole,
         targetCompany: interview.targetCompany,
         selfAssessedLevel: interview.selfAssessedLevel,
-        roleSkills: roleSkillsForResult,
+        roleSkills,
         transcript: interview.conversations.map((conversation) => ({
           type: conversation.type,
           content: conversation.message,
@@ -826,7 +818,7 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
       targetRole: interview.targetRole,
       targetCompany: interview.targetCompany,
       selfAssessedLevel: interview.selfAssessedLevel,
-      roleSkills: roleSkillsForResult,
+      roleSkills,
 
       transcript: interview.conversations.map((conversation) => ({
         type: conversation.type,
