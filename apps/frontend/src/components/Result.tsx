@@ -97,8 +97,11 @@ export function Result() {
   useEffect(() => {
     let cancelled = false;
     let intervalId: number | undefined;
+    let isFetching = false;
 
     const fetchResult = async () => {
+      if (isFetching || cancelled) return;
+      isFetching = true;
       try {
         const response = await axios.get(
           `${BACKEND_URL}/api/v1/result/${interviewId}`,
@@ -112,6 +115,8 @@ export function Result() {
         if (!cancelled) {
           setError("Unable to load your interview evaluation. Please try refreshing.");
         }
+      } finally {
+        isFetching = false;
       }
     };
 

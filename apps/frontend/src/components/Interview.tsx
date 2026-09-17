@@ -347,11 +347,17 @@ export function Interview() {
         return;
       }
 
+      if (!token || typeof token !== "string" || !token.trim()) {
+        reject(new Error("Valid Deepgram authentication token is required"));
+        return;
+      }
+
       setDiagnostics((prev) => ({ ...prev, deepgramStatus: "connecting" }));
 
+      const cleanToken = token.trim();
       const socket = new WebSocket(
         "wss://api.deepgram.com/v1/listen?model=nova-3&language=en-US&smart_format=true&interim_results=true&endpointing=500",
-        ["bearer", token],
+        ["token", cleanToken],
       );
       socketRef.current = socket;
 
@@ -851,21 +857,34 @@ export function Interview() {
         setStatus("connecting-deepgram");
         setDiagnostics((prev) => ({ ...prev, deepgramStatus: "connecting" }));
 
-        const tokenResponse = await axios.post(
-          `${BACKEND_URL}/api/v1/deepgram-token`,
-        );
-        if (!isCurrentSession()) return;
-        const deepgramToken = tokenResponse.data.token;
-        if (!deepgramToken) throw new Error("Deepgram token was not returned");
+        let voiceReady = false;
+        try {
+          const tokenResponse = await axios.post(
+            `${BACKEND_URL}/api/v1/deepgram-token`,
+          );
+          if (!isCurrentSession()) return;
+          const deepgramToken = tokenResponse.data?.token;
+          if (deepgramToken) {
+            // 7. Setup Deepgram and MediaRecorder
+            await setupDeepgramAndRecorder(
+              deepgramToken,
+              mediaStream,
+              sessionId,
+            );
+            voiceReady = true;
+          }
+        } catch (tokenErr: any) {
+          console.warn("[voice] Deepgram voice service unavailable at startup:", tokenErr?.message);
+          const userMsg = tokenErr?.response?.data?.error || "Voice service unavailable. You can type your answers.";
+          setDiagnostics((prev) => ({
+            ...prev,
+            deepgramStatus: "error",
+            lastError: userMsg,
+          }));
+          setError(userMsg);
+        }
 
-        // 7. Setup Deepgram and MediaRecorder
-        await setupDeepgramAndRecorder(
-          deepgramToken,
-          mediaStream,
-          sessionId,
-        );
-
-        // 8. Fetch initial interview question
+        // 8. Fetch initial interview question (continues even if voice is offline)
         const response = await axios.post(
           `${BACKEND_URL}/api/v1/interview/start/${interviewId}`,
         );

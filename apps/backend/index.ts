@@ -351,6 +351,9 @@ app.post("/api/v1/deepgram-token", async (_req, res) => {
       return;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     const response = await fetch("https://api.deepgram.com/v1/auth/grant", {
       method: "POST",
       headers: {
@@ -360,14 +363,16 @@ app.post("/api/v1/deepgram-token", async (_req, res) => {
       body: JSON.stringify({
         ttl_seconds: 600,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const data = (await response.json()) as {
       access_token?: unknown;
     };
 
     if (!response.ok) {
-      console.error("Deepgram token error:", data);
+      console.error("Deepgram token error response:", data);
 
       res.status(response.status).json({
         error: "Failed to generate Deepgram token",
@@ -389,11 +394,25 @@ app.post("/api/v1/deepgram-token", async (_req, res) => {
     res.json({
       token: data.access_token,
     });
-  } catch (error) {
-    console.error("Deepgram token error:", error);
+  } catch (error: any) {
+    const isDnsError =
+      error?.code === "ENOTFOUND" ||
+      error?.cause?.code === "ENOTFOUND" ||
+      String(error?.message || "").includes("ENOTFOUND") ||
+      String(error?.cause?.message || "").includes("ENOTFOUND");
 
-    res.status(500).json({
-      error: "Failed to generate Deepgram token",
+    const isTimeout = error?.name === "AbortError";
+
+    console.warn(
+      `[deepgram-token] ${isDnsError ? "DNS resolution failed (ENOTFOUND)" : isTimeout ? "Request timed out after 8s" : error?.message || error}`,
+    );
+
+    res.status(isDnsError ? 503 : 500).json({
+      error: isDnsError
+        ? "Unable to reach Deepgram speech recognition service. Check internet, DNS, or proxy connectivity."
+        : isTimeout
+          ? "Deepgram token request timed out. Please check network connection."
+          : "Failed to generate Deepgram token",
     });
   }
 });

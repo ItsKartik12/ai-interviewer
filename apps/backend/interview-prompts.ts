@@ -243,7 +243,10 @@ export function parseInterviewDecision(
     .trim();
 
   try {
-    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    const jsonStr = start >= 0 && end > start ? candidate.slice(start, end + 1) : candidate;
+    const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     const question =
       typeof parsed.question === "string" ? parsed.question.trim() : "";
 

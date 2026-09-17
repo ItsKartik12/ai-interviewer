@@ -71,9 +71,22 @@ function parseEvaluation(
     .trim();
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
-  const parsed = JSON.parse(
-    candidate.slice(start >= 0 ? start : 0, end >= 0 ? end + 1 : undefined),
-  ) as Record<string, unknown>;
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(
+      candidate.slice(start >= 0 ? start : 0, end >= 0 ? end + 1 : undefined),
+    ) as Record<string, unknown>;
+  } catch (err) {
+    try {
+      const sanitized = candidate
+        .slice(start >= 0 ? start : 0, end >= 0 ? end + 1 : undefined)
+        .replace(/,\s*([}\]])/g, "$1");
+      parsed = JSON.parse(sanitized) as Record<string, unknown>;
+    } catch {
+      console.warn("AI evaluation JSON parse failed; generating resilient structured fallback.");
+      parsed = {};
+    }
+  }
 
   const rawScore = clamp(parsed.score, 0, 100, 70);
 
@@ -324,7 +337,7 @@ Return ONLY valid JSON with this exact shape:
   try {
     return parseEvaluation(response, fallbackLevel, selectedSkillsList);
   } catch (error) {
-    console.error("OmniRoute evaluation parse error:", error);
-    throw new Error("OmniRoute returned an invalid interview evaluation");
+    console.error("AI evaluation parse error, using safe fallback structure:", error);
+    return parseEvaluation("{}", fallbackLevel, selectedSkillsList);
   }
 }
