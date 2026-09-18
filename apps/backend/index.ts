@@ -6,7 +6,7 @@ import { askOmniRoute } from "./omniroute.ts";
 import { PreInterviewBody } from "./types";
 import { calculateResult } from "./result";
 import {
-  getFrontendUrl,
+  getAllowedFrontendOrigins,
   getPort,
   logServiceConfiguration,
 } from "./config/env.ts";
@@ -70,19 +70,25 @@ const app = express();
 // --------------------------------------------------
 
 app.use(express.json({ limit: "25mb" }));
-app.use(express.urlencoded({ extended: true, limit: "25mb" }));
-
-
-app.use(
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));app.use(
   cors({
     origin: (origin, callback) => {
-      const frontendUrl = getFrontendUrl();
+      const allowedOrigins = getAllowedFrontendOrigins();
+
+      // Non-browser tools (curl, mobile apps, same-origin server calls) send no Origin.
+      // Render health checks also hit us without an Origin header.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const isLocalDev =
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        origin.endsWith(".devtunnels.ms");
 
       if (
-        !origin ||
-        origin === frontendUrl ||
-        origin.includes("localhost") ||
-        origin.includes("devtunnels.ms")
+        isLocalDev ||
+        allowedOrigins.includes(origin)
       ) {
         callback(null, true);
       } else {
@@ -340,59 +346,91 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 // DEEPGRAM SHORT-LIVED TOKEN
 // --------------------------------------------------
 
-app.post("/api/v1/deepgram-token", async (_req, res) => {
+// In-memory cache for Deepgram project ID
+let cachedDeepgramProjectId: string | null = null;
+
+async function getDeepgramTemporaryKey(masterKey: string): Promise<string> {
+  // 1. Resolve project ID if not already cached
+  let projectId = cachedDeepgramProjectId;
+  if (!projectId) {
+    const projectResponse = await fetch("https://api.deepgram.com/v1/projects", {
+      method: "GET",
+      headers: {
+        Authorization: `Token ${masterKey}`,
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+
+    if (!projectResponse.ok) {
+      const errText = await projectResponse.text();
+      throw new Error(`Failed to list Deepgram projects (${projectResponse.status}): ${errText.slice(0, 150)}`);
+    }
+
+    const projectData = (await projectResponse.json()) as {
+      projects?: Array<{ project_id: string }>;
+    };
+
+    const firstProject = projectData.projects?.[0];
+    if (!firstProject?.project_id) {
+      throw new Error("No Deepgram project found for this API key.");
+    }
+
+    projectId = firstProject.project_id;
+    cachedDeepgramProjectId = projectId;
+  }
+
+  // 2. Generate short-lived project key (600s TTL, usage:write scope only)
+  const keyResponse = await fetch(`https://api.deepgram.com/v1/projects/${projectId}/keys`, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${masterKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      comment: "Temporary interview voice session",
+      scopes: ["usage:write"],
+      time_to_live_in_seconds: 600,
+    }),
+    signal: AbortSignal.timeout(7000),
+  });
+
+  if (!keyResponse.ok) {
+    // If cached project ID became invalid, clear cache
+    cachedDeepgramProjectId = null;
+    const errText = await keyResponse.text();
+    throw new Error(`Failed to generate temporary Deepgram key (${keyResponse.status}): ${errText.slice(0, 150)}`);
+  }
+
+  const keyData = (await keyResponse.json()) as {
+    key?: string;
+  };
+
+  if (!keyData.key || typeof keyData.key !== "string") {
+    throw new Error("Deepgram did not return a valid temporary key.");
+  }
+
+  return keyData.key;
+}
+
+const handleDeepgramTokenRequest = async (_req: express.Request, res: express.Response) => {
   try {
     const deepgramKey = process.env.DEEPGRAM_API_KEY;
 
     if (!deepgramKey) {
       res.status(500).json({
-        error: "Deepgram API key is not configured",
+        error: "Deepgram API key is not configured on the backend.",
       });
       return;
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const temporaryToken = await getDeepgramTemporaryKey(deepgramKey.trim());
 
-    const response = await fetch("https://api.deepgram.com/v1/auth/grant", {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${deepgramKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ttl_seconds: 600,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    const data = (await response.json()) as {
-      access_token?: unknown;
-    };
-
-    if (!response.ok) {
-      console.error("Deepgram token error response:", data);
-
-      res.status(response.status).json({
-        error: "Failed to generate Deepgram token",
-      });
-      return;
-    }
-
-    if (typeof data.access_token !== "string" || !data.access_token) {
-      console.error("Deepgram token response did not include an access token");
-
-      res.status(502).json({
-        error: "Deepgram returned an invalid token response",
-      });
-      return;
-    }
-
-    res.set("Cache-Control", "no-store");
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
 
     res.json({
-      token: data.access_token,
+      token: temporaryToken,
     });
   } catch (error: any) {
     const isDnsError =
@@ -401,10 +439,10 @@ app.post("/api/v1/deepgram-token", async (_req, res) => {
       String(error?.message || "").includes("ENOTFOUND") ||
       String(error?.cause?.message || "").includes("ENOTFOUND");
 
-    const isTimeout = error?.name === "AbortError";
+    const isTimeout = error?.name === "TimeoutError" || error?.name === "AbortError";
 
     console.warn(
-      `[deepgram-token] ${isDnsError ? "DNS resolution failed (ENOTFOUND)" : isTimeout ? "Request timed out after 8s" : error?.message || error}`,
+      `[deepgram-token] ${isDnsError ? "DNS resolution failed (ENOTFOUND)" : isTimeout ? "Request timed out after 7s" : error?.message || error}`,
     );
 
     res.status(isDnsError ? 503 : 500).json({
@@ -412,10 +450,14 @@ app.post("/api/v1/deepgram-token", async (_req, res) => {
         ? "Unable to reach Deepgram speech recognition service. Check internet, DNS, or proxy connectivity."
         : isTimeout
           ? "Deepgram token request timed out. Please check network connection."
-          : "Failed to generate Deepgram token",
+          : "Failed to generate Deepgram voice token.",
     });
   }
-});
+};
+
+// Support both POST and GET for maximum compatibility
+app.post("/api/v1/deepgram-token", handleDeepgramTokenRequest);
+app.get("/api/v1/deepgram-token", handleDeepgramTokenRequest);
 
 // --------------------------------------------------
 // START INTERVIEW
@@ -774,7 +816,10 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
       interview.jobDescription ?? null,
     );
 
-    if (interview.status !== "Done") {
+    // Compute the result if the interview is still in progress OR if it was
+    // marked "Done" without ever being scored (e.g. the hard max-questions
+    // completion path sets status "Done" directly without an evaluation).
+    if (interview.status !== "Done" || interview.score == null) {
       const result = await calculateResult(
         interview.conversations,
         interview.githubMetadata,

@@ -16,12 +16,22 @@ export function isGeminiConfigured(): boolean {
 }
 
 export function getFrontendUrl(): string {
-  return getEnv("FRONTEND_URL") ?? "http://localhost:3000";
+  const raw = getEnv("FRONTEND_URL") ?? "http://localhost:3000";
+  return raw.replace(/\/$/, "");
+}
+
+export function getAllowedFrontendOrigins(): string[] {
+  const raw = getEnv("FRONTEND_URL") ?? "http://localhost:3000";
+  return raw
+    .split(",")
+    .map((url) => url.trim().replace(/\/$/, ""))
+    .filter(Boolean);
 }
 
 export function getPort(): number {
   const port = Number(getEnv("PORT") ?? "3001");
-  return Number.isFinite(port) ? port : 3001;
+  // Guard against invalid values (0, NaN) — e.g. an inherited empty PORT env var.
+  return Number.isFinite(port) && port > 0 ? port : 3001;
 }
 
 /** Logs which optional integrations are present. Does not print secret values. */

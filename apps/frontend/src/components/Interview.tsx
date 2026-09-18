@@ -795,7 +795,7 @@ export function Interview() {
           ) {
             setDiagnostics((prev) => ({ ...prev, micPermission: "denied" }));
             throw new Error(
-              "Microphone permission is blocked. Allow microphone access for localhost in Chrome.",
+              "Microphone permission is blocked. Allow microphone access for this site in your browser settings.",
             );
           }
           if (

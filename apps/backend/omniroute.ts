@@ -1,4 +1,3 @@
-const OMNIROUTE_URL = process.env.OMNIROUTE_URL || "http://localhost:20128";
 const OMNIROUTE_API_KEY = process.env.OMNIROUTE_API_KEY;
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "oc/big-pickle";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -169,7 +168,10 @@ async function callOmniRouteInternal(
     throw new Error("OMNIROUTE_API_KEY is missing or empty.");
   }
 
-  const omniUrl = options?.omniUrl || process.env.OMNIROUTE_URL || OMNIROUTE_URL;
+  const omniUrl = options?.omniUrl || process.env.OMNIROUTE_URL;
+  if (!omniUrl) {
+    throw new Error("OMNIROUTE_URL is missing or empty.");
+  }
   const omniModel = options?.omniModel || process.env.OMNIROUTE_MODEL || OMNIROUTE_MODEL;
   const timeoutMs = options?.omniTimeoutMs ?? DEFAULT_OMNI_TIMEOUT_MS;
 
