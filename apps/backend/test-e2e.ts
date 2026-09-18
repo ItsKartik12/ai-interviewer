@@ -348,7 +348,7 @@ async function main() {
 
     try {
       await page.waitForFunction(
-        () => /\/10|Score/i.test(document.body.innerText),
+        () => /\/100\b|Score/i.test(document.body.innerText),
         {
           timeout: 180000,
         },
@@ -356,11 +356,11 @@ async function main() {
 
       const body = await page.evaluate(() => document.body.innerText);
 
-      const scoreMatch = body.match(/(\d+(?:\.\d+)?)\s*\/\s*10/);
+      const scoreMatch = body.match(/(\d+(?:\.\d+)?)\s*\/\s*100\b/);
 
       log(
         `    RESULT PAGE RENDERED — score ${
-          scoreMatch ? `${scoreMatch[1]}/10` : "(rendered)"
+          scoreMatch ? `${scoreMatch[1]}/100` : "(rendered)"
         }`,
       );
     } catch {
