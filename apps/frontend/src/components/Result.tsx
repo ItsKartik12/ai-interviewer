@@ -38,10 +38,16 @@ export interface AssessedSoftSkill {
   evidence: string;
 }
 
+export interface NotAssessedSkill {
+  skill: string;
+  reason: string;
+}
+
 export interface InterviewEvaluation {
   score: number; // 0-100
   demonstratedLevel: "Beginner" | "Intermediate" | "Advanced";
   technicalSkills?: AssessedSkill[];
+  notAssessedSkills?: NotAssessedSkill[];
   softSkills?: AssessedSoftSkill[];
   overallStrengths?: string[];
   overallWeaknesses?: string[];
@@ -91,8 +97,11 @@ export function Result() {
   useEffect(() => {
     let cancelled = false;
     let intervalId: number | undefined;
+    let isFetching = false;
 
     const fetchResult = async () => {
+      if (isFetching || cancelled) return;
+      isFetching = true;
       try {
         const response = await axios.get(
           `${BACKEND_URL}/api/v1/result/${interviewId}`,
@@ -106,6 +115,8 @@ export function Result() {
         if (!cancelled) {
           setError("Unable to load your interview evaluation. Please try refreshing.");
         }
+      } finally {
+        isFetching = false;
       }
     };
 
@@ -459,7 +470,35 @@ export function Result() {
               </section>
             )}
 
-            {/* 4. OVERALL STRENGTHS & RECOMMENDED FOCUS AREAS */}
+            {/* 4. NOT ASSESSED SKILLS */}
+            {evalData?.notAssessedSkills && evalData.notAssessedSkills.length > 0 && (
+              <section>
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold tracking-tight">Skills Not Tested This Session</h2>
+                  <p className="text-xs text-muted-foreground">
+                    These selected skills were not covered during the interview. No score or evidence is fabricated for them.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {evalData.notAssessedSkills.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 p-4"
+                    >
+                      <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted border border-border/60">
+                        <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{item.skill}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{item.reason}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* 5. OVERALL STRENGTHS & RECOMMENDED FOCUS AREAS */}
             <section className="grid gap-6 sm:grid-cols-2">
               <div className="rounded-xl border border-border bg-card/60 p-5">
                 <div className="flex items-center gap-2 text-emerald-400 mb-3">

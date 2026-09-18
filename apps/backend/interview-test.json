@@ -1,0 +1,11 @@
+{
+  "role": "Backend Developer",
+  "company": "Amazon",
+  "skills": [
+    "Node.js",
+    "PostgreSQL",
+    "REST APIs"
+  ],
+  "level": "intermediate",
+  "difficulty": "medium"
+}

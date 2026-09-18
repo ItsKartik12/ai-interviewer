@@ -6,7 +6,7 @@ import { askOmniRoute } from "./omniroute.ts";
 import { PreInterviewBody } from "./types";
 import { calculateResult } from "./result";
 import {
-  getFrontendUrl,
+  getAllowedFrontendOrigins,
   getPort,
   logServiceConfiguration,
 } from "./config/env.ts";
@@ -17,10 +17,51 @@ import {
   buildInterviewSystemPrompt,
   buildTurnInstruction,
   coveredTopics,
+  determineInterviewStage,
   generateRoleSkills,
+  getDifficultyTargets,
   parseInterviewDecision,
+  parseResumeText,
   questionCount,
+  type ResumeContext,
+  type RoleSkillRequirement,
 } from "./interview-prompts.ts";
+import { integrationRouter } from "./routes/integration.ts";
+import { parsePdfDocument } from "./scrapers/pdf.ts";
+
+// --------------------------------------------------
+// MODULE-LEVEL HELPER: Parse combined jobDescription JSON
+// --------------------------------------------------
+function parseJobDesc(raw: string | null): {
+  roleSkills: RoleSkillRequirement | null;
+  resumeContext: ResumeContext | null;
+  selectedSkills: string[];
+} {
+  if (!raw) return { roleSkills: null, resumeContext: null, selectedSkills: [] };
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const selectedSkills = Array.isArray(parsed.selectedSkills)
+      ? (parsed.selectedSkills as string[]).map(String)
+      : [];
+
+    if (parsed.roleSkills !== undefined || parsed.resumeContext !== undefined) {
+      return {
+        roleSkills: (parsed.roleSkills as RoleSkillRequirement) ?? null,
+        resumeContext: (parsed.resumeContext as ResumeContext) ?? null,
+        selectedSkills,
+      };
+    }
+    // Legacy: raw roleSkills at top level
+    if (Array.isArray((parsed as any).technicalSkills)) {
+      return {
+        roleSkills: parsed as unknown as RoleSkillRequirement,
+        resumeContext: null,
+        selectedSkills,
+      };
+    }
+  } catch { /* ignore */ }
+  return { roleSkills: null, resumeContext: null, selectedSkills: [] };
+}
 
 const app = express();
 
@@ -28,18 +69,26 @@ const app = express();
 // MIDDLEWARE
 // --------------------------------------------------
 
-app.use(express.json());
-
-app.use(
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));app.use(
   cors({
     origin: (origin, callback) => {
-      const frontendUrl = getFrontendUrl();
+      const allowedOrigins = getAllowedFrontendOrigins();
+
+      // Non-browser tools (curl, mobile apps, same-origin server calls) send no Origin.
+      // Render health checks also hit us without an Origin header.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const isLocalDev =
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        origin.endsWith(".devtunnels.ms");
 
       if (
-        !origin ||
-        origin === frontendUrl ||
-        origin.includes("localhost") ||
-        origin.includes("devtunnels.ms")
+        isLocalDev ||
+        allowedOrigins.includes(origin)
       ) {
         callback(null, true);
       } else {
@@ -52,6 +101,7 @@ app.use(
 
 app.use(globalRateLimit);
 app.use(healthRouter);
+app.use(integrationRouter);
 
 // --------------------------------------------------
 // AUTH
@@ -106,6 +156,44 @@ app.post("/api/v1/analyze-role", async (req, res) => {
 });
 
 // --------------------------------------------------
+// PARSE PDF RESUME
+// --------------------------------------------------
+
+app.post("/api/v1/parse-pdf", async (req, res) => {
+  try {
+    const { pdfBase64, fileName } = req.body ?? {};
+
+    if (!pdfBase64 || typeof pdfBase64 !== "string") {
+      res.status(400).json({ error: "PDF data (base64) is required." });
+      return;
+    }
+
+    let binaryData: Uint8Array;
+    try {
+      const buf = Buffer.from(pdfBase64, "base64");
+      binaryData = new Uint8Array(buf);
+    } catch {
+      res.status(400).json({ error: "Invalid base64 PDF data." });
+      return;
+    }
+
+    const result = await parsePdfDocument(binaryData);
+
+    res.json({
+      resumeContext: result.resumeContext,
+      textPreview: result.text.slice(0, 500),
+      totalPages: result.totalPages,
+      fileName: fileName ?? "resume.pdf",
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to parse PDF";
+    console.error("[parse-pdf] Error:", message);
+    res.status(422).json({ error: message });
+  }
+});
+
+// --------------------------------------------------
 // CREATE PRE-INTERVIEW
 // --------------------------------------------------
 
@@ -123,22 +211,80 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 
     const data = parsedBody.data;
 
-    const githubUrl = data.github.endsWith("/")
-      ? data.github.slice(0, -1)
-      : data.github;
+    // --------------------------------------------------
+    // GitHub + Resume + Role Skills: all run in parallel
+    // --------------------------------------------------
+    let githubData: unknown = null;
+    const githubUrl = (data.github || "").trim().replace(/\/$/, "");
+    const githubUsername = githubUrl ? githubUrl.split("/").pop() : null;
 
-    const githubUsername = githubUrl.split("/").pop();
+    let resumeContext: ResumeContext | null = null;
 
-    if (!githubUsername) {
-      res.status(400).json({
-        error: "Invalid GitHub URL",
-      });
-      return;
+    // Pre-compute heuristic roleSkills so parallel task has the full input
+    // The LLM call inside generateRoleSkills may be slow — run it alongside scraping.
+    const alreadyHasRoleSkills =
+      data.roleSkills &&
+      Array.isArray(data.roleSkills.technicalSkills) &&
+      data.roleSkills.technicalSkills.length > 0;
+
+    const [githubResult, resumeResult, roleSkillsResult] = await Promise.allSettled([
+      // GitHub scrape (only if URL provided)
+      githubUsername
+        ? (async () => {
+            const { scrapeGithub } = await import("./scrapers/github.ts");
+            return scrapeGithub(githubUsername);
+          })()
+        : Promise.resolve(null),
+      // Resume parse (only if text provided)
+      data.resumeText && data.resumeText.trim().length >= 30
+        ? parseResumeText(data.resumeText)
+        : Promise.resolve(null),
+      // Role skills — skip if already provided by frontend (from analyze-role step)
+      alreadyHasRoleSkills
+        ? Promise.resolve(data.roleSkills)
+        : generateRoleSkills({
+            role: data.role,
+            company: data.company,
+            level: data.level,
+            targetSkill: data.skill,
+          }),
+    ]);
+
+    if (githubResult.status === "fulfilled") {
+      githubData = githubResult.value;
+    } else {
+      console.warn("[github] Scrape failed, continuing:", githubResult.reason);
     }
 
-    const { scrapeGithub } = await import("./scrapers/github.ts");
+    if (resumeResult.status === "fulfilled") {
+      resumeContext = resumeResult.value;
+      if (resumeContext) {
+        console.log("[resume] Parsed resume context:", {
+          projects: resumeContext.projects.length,
+          technologies: resumeContext.technologies.length,
+          experience: resumeContext.experience.length,
+        });
+      }
+    } else {
+      console.warn("[resume] Parse failed, continuing:", resumeResult.reason);
+    }
 
-    const githubData = await scrapeGithub(githubUsername);
+    // Resolve role skills: parallel result → frontend-provided → fallback
+    let roleSkills =
+      roleSkillsResult.status === "fulfilled" && roleSkillsResult.value
+        ? roleSkillsResult.value
+        : data.roleSkills ?? null;
+
+    if (!roleSkills || !Array.isArray(roleSkills.technicalSkills) || roleSkills.technicalSkills.length === 0) {
+      console.warn("[roleSkills] Parallel generation failed, using heuristic fallback:",
+        roleSkillsResult.status === "rejected" ? roleSkillsResult.reason : "no result");
+      roleSkills = await generateRoleSkills({
+        role: data.role,
+        company: data.company,
+        level: data.level,
+        targetSkill: data.skill,
+      });
+    }
 
     const { prisma } = await import("./db.ts");
 
@@ -155,16 +301,12 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       },
     });
 
-    // Ensure role skills are determined and attached
-    let roleSkills = data.roleSkills;
-    if (!roleSkills || !Array.isArray(roleSkills.technicalSkills) || roleSkills.technicalSkills.length === 0) {
-      roleSkills = await generateRoleSkills({
-        role: data.role,
-        company: data.company,
-        level: data.level,
-        targetSkill: data.skill,
-      });
-    }
+    // Store roleSkills, resumeContext, and selectedSkills in jobDescription JSON
+    const jobDescriptionJson = JSON.stringify({
+      roleSkills,
+      resumeContext: resumeContext ?? null,
+      selectedSkills: data.selectedSkills ?? [],
+    });
 
     const interview = await prisma.interview.create({
       data: {
@@ -177,8 +319,8 @@ app.post("/api/v1/pre-interview", async (req, res) => {
         targetCompany: data.company,
         targetRole: data.role,
         duration: 30,
-        githubMetadata: githubData,
-        jobDescription: JSON.stringify(roleSkills),
+        githubMetadata: githubData ?? {},
+        jobDescription: jobDescriptionJson,
         status: "Pre",
       },
     });
@@ -188,6 +330,8 @@ app.post("/api/v1/pre-interview", async (req, res) => {
     res.json({
       id: interview.id,
       roleSkills,
+      hasResume: resumeContext !== null,
+      hasGithub: githubData !== null,
     });
   } catch (error) {
     console.error("Pre-interview error:", error);
@@ -202,63 +346,118 @@ app.post("/api/v1/pre-interview", async (req, res) => {
 // DEEPGRAM SHORT-LIVED TOKEN
 // --------------------------------------------------
 
-app.post("/api/v1/deepgram-token", async (_req, res) => {
+// In-memory cache for Deepgram project ID
+let cachedDeepgramProjectId: string | null = null;
+
+async function getDeepgramTemporaryKey(masterKey: string): Promise<string> {
+  // 1. Resolve project ID if not already cached
+  let projectId = cachedDeepgramProjectId;
+  if (!projectId) {
+    const projectResponse = await fetch("https://api.deepgram.com/v1/projects", {
+      method: "GET",
+      headers: {
+        Authorization: `Token ${masterKey}`,
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+
+    if (!projectResponse.ok) {
+      const errText = await projectResponse.text();
+      throw new Error(`Failed to list Deepgram projects (${projectResponse.status}): ${errText.slice(0, 150)}`);
+    }
+
+    const projectData = (await projectResponse.json()) as {
+      projects?: Array<{ project_id: string }>;
+    };
+
+    const firstProject = projectData.projects?.[0];
+    if (!firstProject?.project_id) {
+      throw new Error("No Deepgram project found for this API key.");
+    }
+
+    projectId = firstProject.project_id;
+    cachedDeepgramProjectId = projectId;
+  }
+
+  // 2. Generate short-lived project key (600s TTL, usage:write scope only)
+  const keyResponse = await fetch(`https://api.deepgram.com/v1/projects/${projectId}/keys`, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${masterKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      comment: "Temporary interview voice session",
+      scopes: ["usage:write"],
+      time_to_live_in_seconds: 600,
+    }),
+    signal: AbortSignal.timeout(7000),
+  });
+
+  if (!keyResponse.ok) {
+    // If cached project ID became invalid, clear cache
+    cachedDeepgramProjectId = null;
+    const errText = await keyResponse.text();
+    throw new Error(`Failed to generate temporary Deepgram key (${keyResponse.status}): ${errText.slice(0, 150)}`);
+  }
+
+  const keyData = (await keyResponse.json()) as {
+    key?: string;
+  };
+
+  if (!keyData.key || typeof keyData.key !== "string") {
+    throw new Error("Deepgram did not return a valid temporary key.");
+  }
+
+  return keyData.key;
+}
+
+const handleDeepgramTokenRequest = async (_req: express.Request, res: express.Response) => {
   try {
     const deepgramKey = process.env.DEEPGRAM_API_KEY;
 
     if (!deepgramKey) {
       res.status(500).json({
-        error: "Deepgram API key is not configured",
+        error: "Deepgram API key is not configured on the backend.",
       });
       return;
     }
 
-    const response = await fetch("https://api.deepgram.com/v1/auth/grant", {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${deepgramKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ttl_seconds: 600,
-      }),
-    });
+    const temporaryToken = await getDeepgramTemporaryKey(deepgramKey.trim());
 
-    const data = (await response.json()) as {
-      access_token?: unknown;
-    };
-
-    if (!response.ok) {
-      console.error("Deepgram token error:", data);
-
-      res.status(response.status).json({
-        error: "Failed to generate Deepgram token",
-      });
-      return;
-    }
-
-    if (typeof data.access_token !== "string" || !data.access_token) {
-      console.error("Deepgram token response did not include an access token");
-
-      res.status(502).json({
-        error: "Deepgram returned an invalid token response",
-      });
-      return;
-    }
-
-    res.set("Cache-Control", "no-store");
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
 
     res.json({
-      token: data.access_token,
+      token: temporaryToken,
     });
-  } catch (error) {
-    console.error("Deepgram token error:", error);
+  } catch (error: any) {
+    const isDnsError =
+      error?.code === "ENOTFOUND" ||
+      error?.cause?.code === "ENOTFOUND" ||
+      String(error?.message || "").includes("ENOTFOUND") ||
+      String(error?.cause?.message || "").includes("ENOTFOUND");
 
-    res.status(500).json({
-      error: "Failed to generate Deepgram token",
+    const isTimeout = error?.name === "TimeoutError" || error?.name === "AbortError";
+
+    console.warn(
+      `[deepgram-token] ${isDnsError ? "DNS resolution failed (ENOTFOUND)" : isTimeout ? "Request timed out after 7s" : error?.message || error}`,
+    );
+
+    res.status(isDnsError ? 503 : 500).json({
+      error: isDnsError
+        ? "Unable to reach Deepgram speech recognition service. Check internet, DNS, or proxy connectivity."
+        : isTimeout
+          ? "Deepgram token request timed out. Please check network connection."
+          : "Failed to generate Deepgram voice token.",
     });
   }
-});
+};
+
+// Support both POST and GET for maximum compatibility
+app.post("/api/v1/deepgram-token", handleDeepgramTokenRequest);
+app.get("/api/v1/deepgram-token", handleDeepgramTokenRequest);
 
 // --------------------------------------------------
 // START INTERVIEW
@@ -315,6 +514,13 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       return;
     }
 
+  const { roleSkills, resumeContext } = parseJobDesc(interview.jobDescription ?? null);
+
+  const targets = getDifficultyTargets(interview.difficulty);
+  const stage = determineInterviewStage(0, interview.difficulty);
+
+    const aiTimerLabel = `[start] OmniRoute (interview ${interview.id})`;
+    console.time(aiTimerLabel);
     const aiResponse = await askOmniRoute([
       {
         role: "system",
@@ -325,10 +531,13 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           selfAssessedLevel: interview.selfAssessedLevel,
           targetCompany: interview.targetCompany,
           targetRole: interview.targetRole,
+          roleSkills,
+          resumeContext,
           questionCount: 0,
           coveredTopics: [],
           durationMinutes: interview.duration,
           previousQuestions: [],
+          currentStage: stage,
         }),
       },
       {
@@ -338,15 +547,20 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           firstTurn: true,
           targetRole: interview.targetRole ?? undefined,
           targetCompany: interview.targetCompany ?? undefined,
+          difficulty: interview.difficulty,
+          currentStage: stage,
+          questionCount: 1,
+          resumeContext,
         }),
       },
     ]);
+    console.timeEnd(aiTimerLabel);
 
     if (!aiResponse) {
       throw new Error("OmniRoute returned an empty response");
     }
 
-    const decision = parseInterviewDecision(aiResponse, interview.difficulty);
+    const decision = parseInterviewDecision(aiResponse, interview.difficulty, stage);
 
     await prisma.message.create({
       data: {
@@ -373,6 +587,10 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       selfAssessedLevel: interview.selfAssessedLevel,
       questionType: decision.questionType,
       skillAssessed: decision.skillAssessed,
+      stage: decision.stage || stage,
+      answerQuality: decision.answerQuality,
+      minQuestions: targets.minQuestions,
+      maxQuestions: targets.maxQuestions,
     });
   } catch (error) {
     console.error("Interview start error:", error);
@@ -437,6 +655,50 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       content: message,
     });
 
+  const { roleSkills, resumeContext } = parseJobDesc(interview.jobDescription ?? null);
+
+    const targets = getDifficultyTargets(interview.difficulty);
+    const currentQuestionCount = questionCount(interview.conversations);
+
+    // Hard stopping condition: If candidate has already answered the maximum questions for their level,
+    // finalize cleanly and stop generating new questions.
+    if (currentQuestionCount >= targets.maxQuestions) {
+      await prisma.interview.update({
+        where: { id: interview.id },
+        data: {
+          status: "Done",
+          completedAt: new Date(),
+        },
+      });
+
+      res.json({
+        message:
+          "Thank you for sharing your background and answering our technical questions today. That concludes our interview! Let's review your performance summary.",
+        difficulty: interview.difficulty,
+        topic: "Interview Conclusion",
+        followUp: false,
+        finished: true,
+        questionType: "wrap-up",
+        skillAssessed: "Interview Conclusion",
+        stage: "stage_8_wrap_up",
+        answerQuality: "strong",
+        minQuestions: targets.minQuestions,
+        maxQuestions: targets.maxQuestions,
+      });
+      return;
+    }
+
+    const isNearEnd = currentQuestionCount >= targets.maxQuestions - 1;
+    const stage = isNearEnd
+      ? "stage_8_wrap_up"
+      : determineInterviewStage(currentQuestionCount, interview.difficulty);
+
+    const previousAssistantMessages = interview.conversations.filter(
+      (item) => item.type === "Assistant",
+    );
+
+    const respondTimerLabel = `[respond] OmniRoute (interview ${interview.id}, Q${currentQuestionCount + 1})`;
+    console.time(respondTimerLabel);
     const aiResponse = await askOmniRoute([
       {
         role: "system",
@@ -447,12 +709,13 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
           selfAssessedLevel: interview.selfAssessedLevel,
           targetCompany: interview.targetCompany,
           targetRole: interview.targetRole,
-          questionCount: questionCount(interview.conversations),
+          roleSkills,
+          resumeContext,
+          questionCount: currentQuestionCount,
           coveredTopics: coveredTopics(interview.conversations),
           durationMinutes: interview.duration,
-          previousQuestions: interview.conversations
-            .filter((item) => item.type === "Assistant")
-            .map((item) => item.message),
+          previousQuestions: previousAssistantMessages.map((item) => item.message),
+          currentStage: stage,
         }),
       },
       {
@@ -460,41 +723,57 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
         content: buildTurnInstruction({
           messages: interview.conversations,
           latestAnswer: message,
+          difficulty: interview.difficulty,
+          currentStage: stage,
+          questionCount: currentQuestionCount + 1,
+          resumeContext,
         }),
       },
     ]);
+    console.timeEnd(respondTimerLabel);
 
     if (!aiResponse) {
       throw new Error("OmniRoute returned an empty response");
     }
 
-    const decision = parseInterviewDecision(aiResponse, interview.difficulty);
+    const decision = parseInterviewDecision(aiResponse, interview.difficulty, stage);
 
-    // Save AI response
-    await prisma.message.create({
-      data: {
-        interviewId: interview.id,
-        type: "Assistant",
-        message: decision.question,
-      },
-    });
+    // If hard max will be reached on this turn or decision finished:
+    const isFinished = decision.finished === true || (isNearEnd && decision.questionType === "wrap-up");
 
-    await prisma.interview.update({
-      where: { id: interview.id },
-      data: {
-        status: "InProgress",
-        difficulty: decision.difficulty,
-      },
-    });
+    // Save AI response + update interview status in parallel
+    await Promise.all([
+      prisma.message.create({
+        data: {
+          interviewId: interview.id,
+          type: "Assistant",
+          message: decision.question,
+        },
+      }),
+      prisma.interview.update({
+        where: { id: interview.id },
+        data: {
+          status: isFinished ? "Done" : "InProgress",
+          difficulty: decision.difficulty,
+          completedAt: isFinished ? new Date() : undefined,
+        },
+      }),
+    ]);
 
     res.json({
       message: decision.question,
       difficulty: decision.difficulty,
       topic: decision.topic,
       followUp: decision.followUp,
-      finished: decision.finished,
+      finished: isFinished,
       questionType: decision.questionType,
       skillAssessed: decision.skillAssessed,
+      stage: decision.stage || stage,
+      answerQuality: decision.answerQuality,
+      hintGiven: decision.hintGiven ?? false,
+      hint: decision.hint,
+      minQuestions: targets.minQuestions,
+      maxQuestions: targets.maxQuestions,
     });
   } catch (error) {
     console.error("Interview response error:", error);
@@ -533,16 +812,14 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     let feedback = interview.feedback;
     let status = interview.status;
 
-    let roleSkills = null;
-    if (interview.jobDescription) {
-      try {
-        roleSkills = JSON.parse(interview.jobDescription);
-      } catch {
-        roleSkills = null;
-      }
-    }
+    const { roleSkills, resumeContext, selectedSkills } = parseJobDesc(
+      interview.jobDescription ?? null,
+    );
 
-    if (interview.status !== "Done") {
+    // Compute the result if the interview is still in progress OR if it was
+    // marked "Done" without ever being scored (e.g. the hard max-questions
+    // completion path sets status "Done" directly without an evaluation).
+    if (interview.status !== "Done" || interview.score == null) {
       const result = await calculateResult(
         interview.conversations,
         interview.githubMetadata,
@@ -550,7 +827,10 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
           role: interview.targetRole,
           company: interview.targetCompany,
           targetSkill: interview.targetSkill,
+          selectedSkills,
           selfAssessedLevel: interview.selfAssessedLevel,
+          roleSkills,
+          resumeContext,
         },
       );
 
