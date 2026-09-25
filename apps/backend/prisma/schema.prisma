@@ -21,13 +21,18 @@ model UserProfile {
   targetRole        String?
   experienceLevel   String?    // beginner, intermediate, advanced
   skills            String[]   @default([])
+  education         String?
+  githubUrl         String?
   bio               String?
-  resumeUrl         String?    // S3/storage URL
-  resumeText        String?    // Extracted text
-  resumeStructured  Json?      // Parsed skills, experience, etc.
+  // Optional resume uploaded once during profile setup. Only the parsed
+  // structured metadata is stored (projects/technologies/education) — never
+  // the raw PDF or file bytes.
+  resumeFileName    String?
+  resumeContext     Json?
+  profileComplete   Boolean    @default(false) // false until first-time setup finishes
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
-  
+
   interviews        Interview[]
 }
 
@@ -66,43 +71,14 @@ model Interview {
   
   // Relations
   conversations         Message[]
-  questionResponses     QuestionResponse[]
-  
+
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
+
+  @@index([userId, createdAt])
 }
 
-// Individual question in an interview
-model QuestionResponse {
-  id              String     @id @default(uuid())
-  interviewId     String
-  interview       Interview  @relation(fields: [interviewId], references: [id], onDelete: Cascade)
-  
-  questionNumber  Int
-  question        String
-  candidateAnswer String
-  
-  // Evaluation metrics
-  score           Int?       // 0-10
-  technicalAccuracy Float?
-  relevance       Float?
-  clarity         Float?
-  depth           Float?
-  problemSolving  Float?
-  communication   Float?
-  confidence      Float?
-  
-  // Feedback
-  strengths       String[]   @default([])
-  weaknesses      String[]   @default([])
-  improvement     String?
-  followUpNeeded  Boolean    @default(false)
-  
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-}
-
-// Conversation messages (legacy compatibility + new)
+// Conversation messages
 model Message {
   id              String     @id @default(uuid())
   interviewId     String

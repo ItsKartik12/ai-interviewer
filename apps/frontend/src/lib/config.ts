@@ -51,7 +51,16 @@ function readFirstEnv(names: string[]): string | undefined {
 function isDevBuild(): boolean {
   const metaEnv = getImportMetaEnv();
   if (metaEnv && typeof metaEnv.DEV === "boolean") return metaEnv.DEV;
-  return false;
+  // Bun dev server has no import.meta.env — treat anything not explicitly
+  // production as development so API calls target localhost:3001 locally.
+  try {
+    if (typeof process !== "undefined" && process.env?.NODE_ENV === "production") {
+      return false;
+    }
+  } catch {
+    /* process unavailable in browser */
+  }
+  return true;
 }
 
 function resolveBackendUrl(): string {

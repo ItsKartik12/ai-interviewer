@@ -7,6 +7,9 @@ export const PreInterviewBody = z
     // Primary skill or selected skills from Step 2
     skill: z.string().trim().optional().default(""),
     selectedSkills: z.array(z.string().trim()).optional().default([]),
+    // Soft skills the candidate explicitly chose to be assessed (from the
+    // AI recommendation step). Empty means no specific soft-skill focus.
+    selectedSoftSkills: z.array(z.string().trim()).optional().default([]),
     skills: z.array(z.string().trim()).optional(),
     level: z.preprocess((val) => {
       if (typeof val === "string") {

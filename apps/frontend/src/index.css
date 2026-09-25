@@ -15,15 +15,14 @@
   }
 }
 
-/* Light mode clean background */
-body {
-  background-color: var(--background);
-}
+/* Theme class is applied in frontend.tsx (dark by default).
+   Light mode remains fully supported via the .dark overrides in globals.css. */
 
 @media (prefers-reduced-motion) {
   *,
   ::before,
   ::after {
     animation: none !important;
+    transition: none !important;
   }
 }

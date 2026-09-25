@@ -1,5 +1,5 @@
-import { BACKEND_URL } from "@/lib/config";
-import axios from "axios";
+import { api } from "@/lib/api";
+import { PageShell, Skeleton } from "./ui/shared";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -34,6 +34,7 @@ export interface AssessedSkill {
 
 export interface AssessedSoftSkill {
   skill: string;
+  score?: number; // 0-100 when evidence-supported; absent in legacy data
   assessment: string;
   evidence: string;
 }
@@ -49,6 +50,7 @@ export interface InterviewEvaluation {
   technicalSkills?: AssessedSkill[];
   notAssessedSkills?: NotAssessedSkill[];
   softSkills?: AssessedSoftSkill[];
+  notAssessedSoftSkills?: NotAssessedSkill[];
   overallStrengths?: string[];
   overallWeaknesses?: string[];
   topicsToImprove?: string[];
@@ -103,8 +105,8 @@ export function Result() {
       if (isFetching || cancelled) return;
       isFetching = true;
       try {
-        const response = await axios.get(
-          `${BACKEND_URL}/api/v1/result/${interviewId}`,
+        const response = await api.get(
+          `/api/v1/result/${interviewId}`,
         );
         if (cancelled) return;
         setResult(response.data);
@@ -215,16 +217,25 @@ export function Result() {
 
   const overallStrengths =
     evalData?.overallStrengths || evalData?.strengths || ["Methodical approach to problem-solving"];
+
+  // Split soft skills into evidence-scored vs qualitative-only (legacy data
+  // has no score field and still renders with its assessment text).
+  const scoredSoftSkills = softSkills.filter(
+    (s) => typeof s.score === "number" && s.score >= 0,
+  );
+  const qualitativeSoftSkills = softSkills.filter(
+    (s) => !(typeof s.score === "number" && s.score >= 0),
+  );
   const overallWeaknesses =
     evalData?.overallWeaknesses || evalData?.weaknesses || ["Deepen understanding of edge-case scenarios"];
   const topicsToImprove =
     evalData?.topicsToImprove || ["System design trade-offs", "Concurrency & failure modes"];
 
   return (
-    <main className="min-h-screen bg-background px-5 py-8 sm:px-8 sm:py-10">
+    <PageShell>
       <AppHeader />
 
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 pt-16 sm:pt-20">
+      <div className="animate-fade-up mx-auto flex w-full max-w-4xl flex-col gap-8 pt-16 sm:pt-20">
         {/* Top Header */}
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
           <div>
@@ -258,36 +269,59 @@ export function Result() {
         )}
 
         {!ready ? (
-          <div className="flex flex-col items-center justify-center gap-5 rounded-2xl border border-border bg-card/50 py-28 text-center shadow-sm">
-            <div className="relative grid size-16 place-items-center rounded-full bg-primary/10">
-              <Loader2 className="size-8 animate-spin text-primary" />
+          <div className="flex flex-col gap-6">
+            {/* Skeleton hero */}
+            <div className="rounded-2xl border border-border bg-card/50 p-8">
+              <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                <div className="w-full max-w-xs">
+                  <Skeleton className="h-4 w-36" />
+                  <Skeleton className="mt-4 h-14 w-48" />
+                </div>
+                <Skeleton className="h-24 w-full max-w-[280px] rounded-xl" />
+              </div>
+              <Skeleton className="mt-8 h-px w-full" />
+              <Skeleton className="mt-5 h-4 w-full" />
+              <Skeleton className="mt-2 h-4 w-4/5" />
+              <Skeleton className="mt-2 h-4 w-3/5" />
             </div>
-            <div>
-              <p className="text-lg font-semibold">Generating your comprehensive evaluation…</p>
-              <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                Analyzing your answers, scoring tested skills, and citing evidence from your transcript. This takes just a few seconds.
+            <div className="flex flex-col items-center gap-3 py-4 text-center">
+              <Loader2 className="size-6 animate-spin text-primary" />
+              <p className="text-sm font-semibold">Generating your comprehensive evaluation…</p>
+              <p className="max-w-md text-xs text-muted-foreground">
+                Analyzing your answers, scoring tested skills, and citing evidence from
+                your transcript. This usually completes within a few seconds.
               </p>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-8">
             {/* 1. OVERALL PERFORMANCE HERO CARD */}
-            <section className="rounded-2xl border border-border bg-card/70 p-6 shadow-sm sm:p-8 backdrop-blur">
-              <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-                    Overall Performance
-                  </span>
-                  <div className="mt-2 flex items-baseline gap-3">
-                    <span className="text-5xl font-extrabold tracking-tight sm:text-6xl text-foreground">
-                      {normalizedScore}
+            <section className="animate-scale-in relative overflow-hidden rounded-2xl border border-border bg-card/70 p-6 shadow-sm sm:p-8">
+              <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-6">
+                  {/* Animated score ring */}
+                  <div
+                    className="relative grid size-28 shrink-0 place-items-center rounded-full"
+                    style={{
+                      background: `conic-gradient(var(--color-primary, oklch(0.68 0.17 292)) ${normalizedScore}%, color-mix(in oklab, var(--color-muted) 70%, transparent) ${normalizedScore}%)`,
+                    }}
+                    role="img"
+                    aria-label={`Overall score ${normalizedScore} out of 100`}
+                  >
+                    <div className="grid size-[88px] place-items-center rounded-full bg-card">
+                      <span className="text-3xl font-extrabold tracking-tight">{normalizedScore}</span>
+                      <span className="text-[10px] font-medium text-muted-foreground">/ 100</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+                      Overall Performance
                     </span>
-                    <span className="text-xl font-medium text-muted-foreground">
-                      / 100
-                    </span>
-                    <span className={`ml-2 inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold ${scoreTier.badge}`}>
-                      {scoreTier.label}
-                    </span>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold ${scoreTier.badge}`}>
+                        {scoreTier.label}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -430,9 +464,7 @@ export function Result() {
                   </div>
                 ))}
               </div>
-            </section>
-
-            {/* 3. SOFT SKILLS ASSESSMENT */}
+            </section>            {/* 3. SOFT SKILLS ASSESSMENT */}
             {softSkills.length > 0 && (
               <section>
                 <div className="mb-4">
@@ -440,33 +472,90 @@ export function Result() {
                     Soft Skills & Communication Assessment
                   </h2>
                   <p className="text-xs text-muted-foreground">
-                    Observed communication clarity, structured thinking, and reasoning under questioning.
+                    Scores are evidence-based: each soft skill is scored only when concrete
+                    moments from your interview support it. Otherwise it appears as Not Assessed.
                   </p>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {softSkills.map((soft, index) => (
-                    <div
-                      key={index}
-                      className="rounded-xl border border-border bg-card/60 p-5 shadow-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Layers className="size-4 text-blue-400" />
-                        <h3 className="text-sm font-semibold text-foreground">
-                          {soft.skill}
-                        </h3>
+                {/* Evidence-scored soft skills */}
+                {scoredSoftSkills.length > 0 && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {scoredSoftSkills.map((soft, index) => (
+                      <div
+                        key={`soft-scored-${index}`}
+                        className="rounded-xl border border-border bg-card/60 p-5 shadow-xs"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Layers className="size-4 text-blue-400" />
+                            <h3 className="text-sm font-semibold text-foreground">{soft.skill}</h3>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-2xl font-bold tracking-tight">{soft.score}</span>
+                            <span className="text-xs text-muted-foreground">/100</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-blue-400 transition-all duration-500"
+                            style={{ width: `${Math.min(100, Math.max(5, soft.score ?? 0))}%` }}
+                          />
+                        </div>
+                        <p className="mt-3 text-xs leading-relaxed text-foreground/90">{soft.assessment}</p>
+                        {soft.evidence && (
+                          <p className="mt-3 text-[11px] text-muted-foreground border-t border-border/50 pt-2 italic">
+                            Evidence: {soft.evidence}
+                          </p>
+                        )}
                       </div>
-                      <p className="mt-2 text-xs leading-relaxed text-foreground/90">
-                        {soft.assessment}
-                      </p>
-                      {soft.evidence && (
-                        <p className="mt-3 text-[11px] text-muted-foreground border-t border-border/50 pt-2 italic">
-                          Evidence: {soft.evidence}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Qualitative-only soft skills (legacy results without scores) */}
+                {qualitativeSoftSkills.length > 0 && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {qualitativeSoftSkills.map((soft, index) => (
+                      <div
+                        key={`soft-qual-${index}`}
+                        className="rounded-xl border border-border bg-card/60 p-5 shadow-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Layers className="size-4 text-blue-400" />
+                          <h3 className="text-sm font-semibold text-foreground">{soft.skill}</h3>
+                        </div>
+                        <p className="mt-2 text-xs leading-relaxed text-foreground/90">{soft.assessment}</p>
+                        {soft.evidence && (
+                          <p className="mt-3 text-[11px] text-muted-foreground border-t border-border/50 pt-2 italic">
+                            Evidence: {soft.evidence}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Soft skills without sufficient evidence — never scored */}
+                {evalData?.notAssessedSoftSkills && evalData.notAssessedSoftSkills.length > 0 && (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {evalData.notAssessedSoftSkills.map((item, idx) => (
+                      <div
+                        key={`soft-na-${idx}`}
+                        className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 p-4"
+                      >
+                        <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted border border-border/60">
+                          <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            {item.skill} <span className="text-xs text-muted-foreground">· Not Assessed</span>
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{item.reason}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
 
@@ -591,8 +680,8 @@ export function Result() {
                             className={cn(
                               "grid size-8 shrink-0 place-items-center rounded-full text-white shadow-xs",
                               isAi
-                                ? "bg-gradient-to-br from-violet-500 to-indigo-600"
-                                : "bg-gradient-to-br from-emerald-400 to-teal-600",
+                                ? "bg-indigo-500"
+                                : "bg-emerald-500",
                             )}
                           >
                             {isAi ? (
@@ -624,6 +713,6 @@ export function Result() {
           </div>
         )}
       </div>
-    </main>
+    </PageShell>
   );
 }

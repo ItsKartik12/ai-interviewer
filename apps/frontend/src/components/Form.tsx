@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router";
 import {
@@ -15,10 +15,15 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { BACKEND_URL } from "@/lib/config";
+import { api } from "@/lib/api";
+import { fetchProfile, type UserProfileDto } from "./ProfileSetup";
+import { TECH_ROLE_CATEGORIES } from "@/data/techRoles";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { AppHeader } from "./AppHeader";
+import { PageShell } from "./ui/shared";
+import { cn } from "@/lib/utils";
+import { Plus } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -95,6 +100,7 @@ interface RoleSkillRequirement {
 export function Form() {
   const [step, setStep] = useState<1 | 2>(1);
   const [github, setGithub] = useState("");
+  const [roleCategory, setRoleCategory] = useState<string>("");
   const [level, setLevel] = useState("");
   const [company, setCompany] = useState("");
   const [role, setRole] = useState("");
@@ -103,10 +109,13 @@ export function Form() {
   const [starting, setStarting] = useState(false);
   const [roleSkills, setRoleSkills] = useState<RoleSkillRequirement | null>(null);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedSoftSkills, setSelectedSoftSkills] = useState<string[]>([]);
+  const [customSkillInput, setCustomSkillInput] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
-
+  const [profile, setProfile] = useState<UserProfileDto | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [pdfState, setPdfState] = useState<PdfState>({
     file: null,
     parsing: false,
@@ -114,6 +123,36 @@ export function Form() {
     resumeContext: null,
     error: null,
   });
+
+  // --- Load persistent profile: prefill saved fields, redirect if incomplete ---
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await fetchProfile();
+        if (cancelled) return;
+        if (!p || !p.profileComplete) {
+          navigate("/profile/setup", { replace: true });
+          return;
+        }
+        setProfile(p);
+        if (!role && p.targetRole) setRole(p.targetRole);
+        if (!company && p.githubUrl === "" && p.targetRole) {
+          // no company stored in profile — leave blank for per-interview choice
+        }
+        if (!level && p.experienceLevel) setLevel(p.experienceLevel);
+        if (!github && p.githubUrl) setGithub(p.githubUrl);
+      } catch {
+        // 401 interceptor handles sign-out; other errors just skip prefill
+      } finally {
+        if (!cancelled) setProfileLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // --- PDF handling ---
 
@@ -130,7 +169,7 @@ export function Form() {
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      const response = await axios.post(`${BACKEND_URL}/api/v1/parse-pdf`, {
+      const response = await api.post("/api/v1/parse-pdf", {
         pdfBase64: base64,
         fileName: file.name,
       });
@@ -216,13 +255,15 @@ export function Form() {
     setAnalyzing(true);
     let fetchedSkills: RoleSkillRequirement | null = null;
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/v1/analyze-role`, {
+      const response = await api.post("/api/v1/analyze-role", {
         role: role.trim(),
         company: company.trim(),
         level,
-        context: pdfState.resumeContext
-          ? JSON.stringify(pdfState.resumeContext).slice(0, 2000)
-          : undefined,
+        // Enrich AI recommendations with the candidate's GitHub + parsed resume
+        // (profile-level fallback when no per-interview upload).
+        githubUrl: github.trim() || profile?.githubUrl || undefined,
+        resumeContext:
+          pdfState.resumeContext ?? profile?.resumeContext ?? undefined,
       });
       if (response.data?.roleSkills) fetchedSkills = response.data.roleSkills as RoleSkillRequirement;
     } catch { /* fallback below */ }
@@ -243,11 +284,14 @@ export function Form() {
     };
     setRoleSkills(resolved);
 
-    // Pre-select core + important skills
-    const defaults = resolved.technicalSkills
+    // Pre-select core + important TECHNICAL skills; soft skills default to
+    // the top two AI picks — the user can change any of it.
+    const techDefaults = resolved.technicalSkills
       .filter((s) => s.importance === "core" || s.importance === "high" || s.importance === "important")
       .map((s) => s.skill);
-    setSelectedSkills(defaults.length > 0 ? defaults : resolved.technicalSkills.slice(0, 2).map((s) => s.skill));
+    setSelectedSkills(techDefaults.length > 0 ? techDefaults : resolved.technicalSkills.slice(0, 2).map((s) => s.skill));
+    setSelectedSoftSkills(resolved.softSkills.slice(0, 2).map((s) => s.skill));
+    setCustomSkillInput("");
 
     setStep(2);
   }
@@ -260,6 +304,23 @@ export function Form() {
     );
   }
 
+  function toggleSoftSkill(skillName: string) {
+    setSelectedSoftSkills((prev) =>
+      prev.includes(skillName) ? prev.filter((s) => s !== skillName) : [...prev, skillName]
+    );
+  }
+
+  function addCustomSkill() {
+    const name = customSkillInput.trim();
+    if (!name) return;
+    if (selectedSkills.includes(name)) {
+      setCustomSkillInput("");
+      return;
+    }
+    setSelectedSkills((prev) => [...prev, name]);
+    setCustomSkillInput("");
+  }
+
   // --- Start interview ---
 
   async function onStartInterview() {
@@ -269,10 +330,11 @@ export function Form() {
     }
     setStarting(true);
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/v1/pre-interview`, {
+      const response = await api.post("/api/v1/pre-interview", {
         github: github.trim(),
         skill: selectedSkills[0] ?? "",
         selectedSkills,
+        selectedSoftSkills,
         level,
         company: company.trim(),
         role: role.trim(),
@@ -313,27 +375,63 @@ export function Form() {
           .slice(0, 3);
 
   return (
-    <main className="relative min-h-screen bg-background px-5 py-8 sm:px-8 sm:py-10">
+    <PageShell>
       <AppHeader />
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 pt-16 sm:pt-20">
+      <div className="animate-fade-up mx-auto flex w-full max-w-3xl flex-col gap-8 pt-16 sm:pt-20">
         <section className="max-w-2xl">
+          {/* Progress steps */}
+          <div className="mb-6 flex items-center gap-2" aria-label="Setup progress">
+            {[
+              { n: 1, label: "Setup" },
+              { n: 2, label: "Skills" },
+            ].map(({ n, label }) => (
+              <div key={n} className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "grid size-6 place-items-center rounded-full border text-[11px] font-bold transition-all",
+                    step >= n
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-muted text-muted-foreground",
+                  )}
+                >
+                  {n}
+                </span>
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    step >= n ? "text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {label}
+                </span>
+                {n === 1 && <span className="mx-1 h-px w-8 bg-border" />}
+              </div>
+            ))}
+          </div>
+
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground shadow-2xs">
             <Mic className="size-3.5 text-primary" />
             AI Voice Interview Platform
           </div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
-            Technical Interview Kickstart
+          <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
+            {step === 1 ? (
+              <>
+                Configure your <span className="text-primary">mock interview</span>
+              </>
+            ) : (
+              "Review your interview plan"
+            )}
           </h1>
           <p className="mt-3 max-w-xl text-base leading-relaxed text-muted-foreground">
             {step === 1
               ? "Specify your target role, company, and level, then upload your resume PDF. Our AI builds a tailored interview plan based on your background."
-              : `Review and select the skills to focus on (${expectedQuestions} total), then begin your live voice interview.`}
+              : `Select the skills to focus on (${expectedQuestions} total), then begin your live voice interview.`}
           </p>
         </section>
 
         {/* ─────────────────────────── STEP 1 ─────────────────────────── */}
         {step === 1 ? (
-          <section className="rounded-2xl border border-border bg-card/70 p-5 shadow-sm sm:p-7">
+          <section className="animate-fade-up rounded-2xl border border-border bg-card/70 p-5 shadow-sm transition-all duration-200 sm:p-7">
             <div className="mb-6">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
                 Step 1 of 2 • Candidate Setup
@@ -344,19 +442,52 @@ export function Form() {
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
-              {/* Target role */}
-              <label className="grid gap-2 text-sm font-medium">
-                Target role
-                <Input
-                  value={role}
-                  placeholder="e.g. Frontend Developer, Backend Engineer"
-                  onChange={(e) => { setRole(e.target.value); clearError("role"); }}
+              {/* Target role — categorized tech-only picker with custom option */}
+              <div className="grid gap-2 text-sm font-medium">
+                <span>Target role</span>
+                <Select
+                  value={roleCategory}
+                  onValueChange={(value) => {
+                    setRoleCategory(value);
+                    const preset = value !== "__custom__"
+                      ? TECH_ROLE_CATEGORIES.flatMap((c) => c.roles).find(
+                          (r) => r === value,
+                        )
+                      : undefined;
+                    setRole(preset ?? "");
+                    clearError("role");
+                  }}
                   disabled={analyzing}
-                  className={fieldClass("role")}
-                  aria-invalid={Boolean(errors.role)}
-                />
+                >
+                  <SelectTrigger className="w-full" aria-invalid={Boolean(errors.role)}>
+                    <SelectValue placeholder="Choose a technical role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TECH_ROLE_CATEGORIES.map((group) => (
+                      <div key={group.category}>
+                        <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {group.category}
+                        </div>
+                        {group.roles.map((r) => (
+                          <SelectItem key={r} value={r}>{r}</SelectItem>
+                        ))}
+                      </div>
+                    ))}
+                    <SelectItem value="__custom__">Other (type your own)…</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(roleCategory === "__custom__" || !TECH_ROLE_CATEGORIES.flatMap((c) => c.roles).includes(role)) && (
+                  <Input
+                    value={role}
+                    placeholder="e.g. Platform Engineer"
+                    onChange={(e) => { setRole(e.target.value); clearError("role"); }}
+                    disabled={analyzing}
+                    className={fieldClass("role")}
+                    aria-invalid={Boolean(errors.role)}
+                  />
+                )}
                 {errors.role && <span className="text-xs text-destructive">{errors.role}</span>}
-              </label>
+              </div>
 
               {/* Target company */}
               <label className="grid gap-2 text-sm font-medium">
@@ -538,7 +669,7 @@ export function Form() {
           </section>
         ) : (
           /* ─────────────────────────── STEP 2 ─────────────────────────── */
-          <section className="rounded-2xl border border-border bg-card/70 p-5 shadow-sm sm:p-7">
+          <section className="animate-fade-up rounded-2xl border border-border bg-card/70 p-5 shadow-sm transition-all duration-200 sm:p-7">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
@@ -598,14 +729,14 @@ export function Form() {
             {/* Skill selection header */}
             <div className="mt-6 flex items-center justify-between gap-4">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Technical Skills — Select to Focus
+                Recommended Skills
               </h3>
-              <span className="text-xs text-muted-foreground">
-                {effectiveSelected.length} of {allSkillsForStep2.length} selected
+              <span className="text-xs font-medium text-foreground">
+                {effectiveSelected.length} technical · {selectedSoftSkills.length} soft skill{selectedSoftSkills.length === 1 ? "" : "s"} selected
               </span>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Click a card to include or exclude it. Selected skills drive the primary focus of your interview. At least one must be selected.
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Based on your {role} role{company ? ` at ${company}` : ""}, the AI recommends the skills below. These are the skills that will be evaluated during your interview — select only what you want assessed.
             </p>
 
             {/* Technical skill cards with selection toggle */}
@@ -621,7 +752,7 @@ export function Form() {
                     className={`flex flex-col justify-between rounded-xl border p-4 text-left transition-all ${
                       isSelected
                         ? "border-primary/60 bg-primary/5 ring-1 ring-primary/30"
-                        : "border-border/80 bg-background/40 hover:border-border hover:bg-muted/20"
+                        : "border-border/80 bg-background/40 transition-all duration-150 hover:border-primary/30 hover:bg-muted/20 hover:-translate-y-0.5"
                     } ${starting ? "pointer-events-none opacity-60" : ""}`}
                     aria-pressed={isSelected}
                     aria-label={`${isSelected ? "Deselect" : "Select"} skill: ${item.skill}`}
@@ -655,27 +786,115 @@ export function Form() {
               })}
             </div>
 
-            {/* Soft skills (display only) */}
+            {/* Custom technical skill add — custom skills appear as removable chips */}
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <Input
+                value={customSkillInput}
+                onChange={(e) => setCustomSkillInput(e.target.value)}
+                placeholder="Add a custom technical skill (e.g. GraphQL, Kafka)"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomSkill();
+                  }
+                }}
+                disabled={starting}
+                className="bg-background"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addCustomSkill}
+                disabled={starting || !customSkillInput.trim()}
+                className="gap-1.5 shrink-0"
+              >
+                <Plus className="size-3.5" />
+                Add skill
+              </Button>
+            </div>
+            {selectedSkills.filter((s) => !allSkillsForStep2.some((r) => r.skill === s)).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selectedSkills
+                  .filter((s) => !allSkillsForStep2.some((r) => r.skill === s))
+                  .map((custom) => (
+                    <span
+                      key={custom}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 py-1 pl-3 pr-1.5 text-xs font-medium text-primary"
+                    >
+                      {custom}
+                      <button
+                        type="button"
+                        onClick={() => toggleSkill(custom)}
+                        disabled={starting}
+                        aria-label={`Remove custom skill: ${custom}`}
+                        className="rounded-full p-0.5 transition hover:bg-primary/20"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+              </div>
+            )}
+
+            {/* Soft skills (selectable — evidence is collected during the interview) */}
             {roleSkills?.softSkills && roleSkills.softSkills.length > 0 && (
               <div className="mt-6">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                  Behavioral &amp; Soft Skills — Always Evaluated
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                    Soft Skills
+                  </h3>
+                  <span className="text-xs text-muted-foreground">
+                    {selectedSoftSkills.length} selected
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Selected soft skills are assessed through behavioral questions and scored with cited evidence. Unselected ones are not scored.
+                </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {roleSkills.softSkills.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="flex flex-col justify-between rounded-xl border border-border/60 bg-muted/20 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-sm font-semibold text-foreground">{item.skill}</span>
-                        {getImportanceBadge(item.importance)}
-                      </div>
-                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                        {item.rationale || item.reason || "Essential interpersonal and communication skill."}
-                      </p>
-                    </div>
-                  ))}
+                  {roleSkills.softSkills.map((item, idx) => {
+                    const isSelected = selectedSoftSkills.includes(item.skill);
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => toggleSoftSkill(item.skill)}
+                        disabled={starting}
+                        className={`flex flex-col justify-between rounded-xl border p-4 text-left transition-all ${
+                          isSelected
+                            ? "border-primary/60 bg-primary/5 ring-1 ring-primary/30"
+                            : "border-border/80 bg-background/40 hover:border-primary/30 hover:bg-muted/20 hover:-translate-y-0.5"
+                        } ${starting ? "pointer-events-none opacity-60" : ""}`}
+                        aria-pressed={isSelected}
+                        aria-label={`${isSelected ? "Deselect" : "Select"} soft skill: ${item.skill}`}
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-sm font-semibold text-foreground">{item.skill}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {getImportanceBadge(item.importance)}
+                              <span
+                                className={`inline-flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                                  isSelected
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "border-border bg-background"
+                                }`}
+                              >
+                                {isSelected && (
+                                  <svg viewBox="0 0 10 8" fill="none" className="size-2.5">
+                                    <path d="M1 4l2.5 2.5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                            {item.rationale || item.reason || "Essential interpersonal and communication skill."}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -704,10 +923,10 @@ export function Form() {
 
             {/* Action bar */}
             <div className="mt-8 flex flex-col items-center justify-between gap-4 border-t border-border pt-6 sm:flex-row">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs leading-relaxed text-muted-foreground">
                 {effectiveSelected.length === 0
                   ? "Select at least one skill above to enable the interview."
-                  : `Focused on: ${effectiveSelected.join(", ")}`}
+                  : `Assessing: ${effectiveSelected.join(", ")}${selectedSoftSkills.length > 0 ? ` + ${selectedSoftSkills.length} soft skill${selectedSoftSkills.length === 1 ? "" : "s"}` : ""}`}
               </p>
               <Button
                 disabled={starting || effectiveSelected.length === 0}
@@ -726,6 +945,6 @@ export function Form() {
           </section>
         )}
       </div>
-    </main>
+    </PageShell>
   );
 }

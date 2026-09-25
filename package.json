@@ -1,5 +1,5 @@
 {
-  "name": "interview-mercor",
+  "name": "ai-interviewer",
   "private": true,
   "scripts": {
     "build": "turbo run build",

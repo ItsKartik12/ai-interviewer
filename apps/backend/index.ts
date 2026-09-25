@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import z from "zod";
+import { Prisma } from "./generated/prisma/client";
 
 import { askOmniRoute } from "./omniroute.ts";
 import { PreInterviewBody } from "./types";
@@ -18,11 +20,15 @@ import {
   buildTurnInstruction,
   coveredTopics,
   determineInterviewStage,
+  inferQuestionType,
+  isNearDuplicateQuestion,
+  sanitizeAnswer,
   generateRoleSkills,
   getDifficultyTargets,
   parseInterviewDecision,
   parseResumeText,
   questionCount,
+  type QuestionType,
   type ResumeContext,
   type RoleSkillRequirement,
 } from "./interview-prompts.ts";
@@ -36,12 +42,17 @@ function parseJobDesc(raw: string | null): {
   roleSkills: RoleSkillRequirement | null;
   resumeContext: ResumeContext | null;
   selectedSkills: string[];
+  selectedSoftSkills: string[];
 } {
-  if (!raw) return { roleSkills: null, resumeContext: null, selectedSkills: [] };
+  if (!raw)
+    return { roleSkills: null, resumeContext: null, selectedSkills: [], selectedSoftSkills: [] };
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const selectedSkills = Array.isArray(parsed.selectedSkills)
       ? (parsed.selectedSkills as string[]).map(String)
+      : [];
+    const selectedSoftSkills = Array.isArray(parsed.selectedSoftSkills)
+      ? (parsed.selectedSoftSkills as string[]).map(String)
       : [];
 
     if (parsed.roleSkills !== undefined || parsed.resumeContext !== undefined) {
@@ -49,6 +60,7 @@ function parseJobDesc(raw: string | null): {
         roleSkills: (parsed.roleSkills as RoleSkillRequirement) ?? null,
         resumeContext: (parsed.resumeContext as ResumeContext) ?? null,
         selectedSkills,
+        selectedSoftSkills,
       };
     }
     // Legacy: raw roleSkills at top level
@@ -57,13 +69,16 @@ function parseJobDesc(raw: string | null): {
         roleSkills: parsed as unknown as RoleSkillRequirement,
         resumeContext: null,
         selectedSkills,
+        selectedSoftSkills,
       };
     }
   } catch { /* ignore */ }
-  return { roleSkills: null, resumeContext: null, selectedSkills: [] };
+  return { roleSkills: null, resumeContext: null, selectedSkills: [], selectedSoftSkills: [] };
 }
 
 const app = express();
+
+const isProduction = process.env.NODE_ENV === "production";
 
 // --------------------------------------------------
 // MIDDLEWARE
@@ -82,14 +97,14 @@ app.use(express.urlencoded({ extended: true, limit: "25mb" }));app.use(
         return;
       }
 
+      // Local dev allowances only outside production; production trusts
+      // exclusively the FRONTEND_URL allowlist.
       const isLocalDev =
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-        origin.endsWith(".devtunnels.ms");
+        !isProduction &&
+        (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+          origin.endsWith(".devtunnels.ms"));
 
-      if (
-        isLocalDev ||
-        allowedOrigins.includes(origin)
-      ) {
+      if (isLocalDev || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
@@ -121,12 +136,194 @@ app.get(
 );
 
 // --------------------------------------------------
+// USER PROFILE (persistent, owned by the authenticated Firebase user)
+// --------------------------------------------------
+
+const ProfileUpdateBody = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  education: z.string().trim().max(2000).optional(),
+  targetRole: z.string().trim().min(1).max(120).optional(),
+  experienceLevel: z
+    .enum(["Beginner", "Intermediate", "Advanced"])
+    .optional(),
+  skills: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
+  // Persistent resume metadata: only the parsed structured context (projects,
+  // technologies, education…) and the display file name are stored. The raw
+  // PDF / file bytes are never persisted.
+  resumeFileName: z.string().trim().max(200).optional(),
+  resumeContext: z.any().optional(),
+  githubUrl: z
+    .string()
+    .trim()
+    .max(300)
+    .refine((v) => v === "" || /^https?:\/\/.+/.test(v), {
+      message: "GitHub URL must be a valid http(s) URL",
+    })
+    .optional(),
+  profileComplete: z.boolean().optional(),
+});
+
+app.get(
+  "/api/v1/profile",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const user = await ensureUserProfile(req.user!);
+      res.json({ profile: user });
+    } catch (error) {
+      console.error("Profile fetch error:", error);
+      res.status(500).json({ error: "Failed to load profile" });
+    }
+  },
+);
+
+app.patch(
+  "/api/v1/profile",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const parsed = ProfileUpdateBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: "Invalid profile update",
+          fields: parsed.error.flatten().fieldErrors,
+        });
+        return;
+      }
+
+      await ensureUserProfile(req.user!);
+      const { prisma } = await import("./db.ts");
+      // Resume removal: explicitly clearing the file name resets both fields.
+      const clearedResume =
+        parsed.data.resumeFileName !== undefined &&
+        parsed.data.resumeFileName.trim() === "";
+      const profile = await prisma.userProfile.update({
+        where: { uid: req.user!.uid },
+        data: {
+          name: parsed.data.name,
+          education: parsed.data.education,
+          targetRole: parsed.data.targetRole,
+          experienceLevel: parsed.data.experienceLevel,
+          skills: parsed.data.skills,
+          githubUrl: parsed.data.githubUrl,
+          profileComplete: parsed.data.profileComplete,
+          resumeFileName: clearedResume ? null : parsed.data.resumeFileName,
+          resumeContext: clearedResume
+            ? Prisma.JsonNull
+            : parsed.data.resumeContext !== undefined
+              ? (parsed.data.resumeContext as Prisma.InputJsonValue)
+              : undefined,
+        },
+      });
+
+      res.json({ profile });
+    } catch (error) {
+      console.error("Profile update error:", error);
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  },
+);
+
+// --------------------------------------------------
+// RESULTS HISTORY (scoped strictly to the authenticated user)
+// --------------------------------------------------
+
+app.get(
+  "/api/v1/interviews",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const { prisma } = await import("./db.ts");
+      const interviews = await prisma.interview.findMany({
+        where: { userId: req.user!.uid, status: "Done", score: { not: null } },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          role: true,
+          targetRole: true,
+          targetCompany: true,
+          targetSkill: true,
+          selfAssessedLevel: true,
+          score: true,
+          feedback: true,
+          strengthsList: true,
+          weaknessesList: true,
+          evaluation: true,
+          completedAt: true,
+          createdAt: true,
+        },
+      });
+
+      res.json({ interviews });
+    } catch (error) {
+      console.error("History fetch error:", error);
+      res.status(500).json({ error: "Failed to load interview history" });
+    }
+  },
+);
+
+// --------------------------------------------------
+// AUTH HELPERS — shared guards for user-owned resources
+// --------------------------------------------------
+
+/**
+ * Load an interview and enforce that it belongs to the authenticated user.
+ * Returns the interview or null after sending the appropriate error response.
+ */
+async function loadOwnedInterview(
+  req: AuthenticatedRequest,
+  res: express.Response,
+  interviewId: string,
+) {
+  const { prisma } = await import("./db.ts");
+  const interview = await prisma.interview.findUnique({
+    where: { id: interviewId },
+    include: { conversations: true },
+  });
+
+  if (!interview) {
+    res.status(404).json({ error: "Interview not found" });
+    return null;
+  }
+
+  // Ownership check: a valid interview ID alone is NOT enough — the resource
+  // must belong to the authenticated Firebase user.
+  if (req.user?.uid && interview.userId !== req.user.uid) {
+    res.status(403).json({ error: "You do not have access to this interview" });
+    return null;
+  }
+
+  return interview;
+}
+
+/**
+ * Create or fetch the database user record for an authenticated Firebase user.
+ * Identity always comes from the verified Firebase ID token — never from the client body.
+ */
+async function ensureUserProfile(user: NonNullable<AuthenticatedRequest["user"]>) {
+  const { prisma } = await import("./db.ts");
+  return prisma.userProfile.upsert({
+    where: { uid: user.uid },
+    update: {
+      email: user.email ?? undefined,
+      name: user.name ?? undefined,
+    },
+    create: {
+      uid: user.uid,
+      email: user.email ?? `${user.uid}@unknown.local`,
+      name: user.name ?? null,
+    },
+  });
+}
+
+// --------------------------------------------------
 // ANALYZE ROLE SKILLS
 // --------------------------------------------------
 
-app.post("/api/v1/analyze-role", async (req, res) => {
+app.post("/api/v1/analyze-role", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const { role, company, level, skill, context } = req.body ?? {};
+    const { role, company, level, skill, context, githubUrl, resumeContext } =
+      req.body ?? {};
 
     if (!role || typeof role !== "string") {
       res.status(400).json({
@@ -141,6 +338,15 @@ app.post("/api/v1/analyze-role", async (req, res) => {
       level: level ? String(level).trim() : undefined,
       targetSkill: skill ? String(skill).trim() : undefined,
       context: context ? String(context).trim() : undefined,
+      // Enrich recommendations with the candidate's GitHub + parsed resume so
+      // suggested skills bridge the role with the candidate's real stack.
+      githubMetadata: githubUrl
+        ? { summary: `Candidate GitHub profile: ${String(githubUrl).trim()}` }
+        : undefined,
+      resumeContext:
+        resumeContext && typeof resumeContext === "object"
+          ? (resumeContext as ResumeContext)
+          : undefined,
     });
 
     res.json({
@@ -159,7 +365,7 @@ app.post("/api/v1/analyze-role", async (req, res) => {
 // PARSE PDF RESUME
 // --------------------------------------------------
 
-app.post("/api/v1/parse-pdf", async (req, res) => {
+app.post("/api/v1/parse-pdf", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { pdfBase64, fileName } = req.body ?? {};
 
@@ -197,7 +403,7 @@ app.post("/api/v1/parse-pdf", async (req, res) => {
 // CREATE PRE-INTERVIEW
 // --------------------------------------------------
 
-app.post("/api/v1/pre-interview", async (req, res) => {
+app.post("/api/v1/pre-interview", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const parsedBody = PreInterviewBody.safeParse(req.body);
 
@@ -219,6 +425,14 @@ app.post("/api/v1/pre-interview", async (req, res) => {
     const githubUsername = githubUrl ? githubUrl.split("/").pop() : null;
 
     let resumeContext: ResumeContext | null = null;
+    // Resolve profile-level resume fallback once — used below when the
+    // interview form has no per-interview upload.
+    const profileForResume = await ensureUserProfile(req.user!);
+    const profileResume: ResumeContext | null =
+      profileForResume.resumeContext &&
+      typeof profileForResume.resumeContext === "object"
+        ? (profileForResume.resumeContext as ResumeContext)
+        : null;
 
     // Pre-compute heuristic roleSkills so parallel task has the full input
     // The LLM call inside generateRoleSkills may be slow — run it alongside scraping.
@@ -269,6 +483,13 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       console.warn("[resume] Parse failed, continuing:", resumeResult.reason);
     }
 
+    // Fall back to the profile-level resume when the interview form has no
+    // per-interview upload, so profile personalization always applies.
+    if (!resumeContext && profileResume) {
+      resumeContext = profileResume;
+      console.log("[resume] Using profile-level resume context (no per-interview upload).");
+    }
+
     // Resolve role skills: parallel result → frontend-provided → fallback
     let roleSkills =
       roleSkillsResult.status === "fulfilled" && roleSkillsResult.value
@@ -286,26 +507,17 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       });
     }
 
+    // Identity comes exclusively from the verified Firebase token.
+    // (profileForResume was already fetched above for the resume fallback.)
+    const user = profileForResume;
     const { prisma } = await import("./db.ts");
-
-    // Temporary user for local development
-    const user = await prisma.userProfile.upsert({
-      where: {
-        uid: "local-dev-user",
-      },
-      update: {},
-      create: {
-        uid: "local-dev-user",
-        email: "local-dev@example.com",
-        name: "Local Developer",
-      },
-    });
 
     // Store roleSkills, resumeContext, and selectedSkills in jobDescription JSON
     const jobDescriptionJson = JSON.stringify({
       roleSkills,
       resumeContext: resumeContext ?? null,
       selectedSkills: data.selectedSkills ?? [],
+      selectedSoftSkills: data.selectedSoftSkills ?? [],
     });
 
     const interview = await prisma.interview.create({
@@ -325,7 +537,7 @@ app.post("/api/v1/pre-interview", async (req, res) => {
       },
     });
 
-    console.log("Interview created:", interview.id);
+    console.log("Interview created:", interview.id, "for user:", user.uid);
 
     res.json({
       id: interview.id,
@@ -455,9 +667,10 @@ const handleDeepgramTokenRequest = async (_req: express.Request, res: express.Re
   }
 };
 
-// Support both POST and GET for maximum compatibility
-app.post("/api/v1/deepgram-token", handleDeepgramTokenRequest);
-app.get("/api/v1/deepgram-token", handleDeepgramTokenRequest);
+// Both POST and GET are authenticated and rate-limited: only signed-in users
+// may mint short-lived speech credentials (abuse/cost protection).
+app.post("/api/v1/deepgram-token", requireAuth, authRateLimit, handleDeepgramTokenRequest);
+app.get("/api/v1/deepgram-token", requireAuth, authRateLimit, handleDeepgramTokenRequest);
 
 // --------------------------------------------------
 // START INTERVIEW
@@ -467,22 +680,16 @@ app.get("/api/v1/deepgram-token", handleDeepgramTokenRequest);
 // Frontend calls this when the interview page opens.
 // OmniRoute generates the first interviewer question.
 
-app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
+app.post("/api/v1/interview/start/:interviewId", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
+    const interview = await loadOwnedInterview(
+      req,
+      res,
+      String(req.params.interviewId),
+    );
+    if (!interview) return;
+
     const { prisma } = await import("./db.ts");
-
-    const interview = await prisma.interview.findUnique({
-      where: {
-        id: req.params.interviewId,
-      },
-    });
-
-    if (!interview) {
-      res.status(404).json({
-        error: "Interview not found",
-      });
-      return;
-    }
 
     // Don't create another first question if one already exists.
     const existingMessages = await prisma.message.findMany({
@@ -514,7 +721,7 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
       return;
     }
 
-  const { roleSkills, resumeContext } = parseJobDesc(interview.jobDescription ?? null);
+  const { roleSkills, resumeContext, selectedSkills, selectedSoftSkills } = parseJobDesc(interview.jobDescription ?? null);
 
   const targets = getDifficultyTargets(interview.difficulty);
   const stage = determineInterviewStage(0, interview.difficulty);
@@ -533,10 +740,13 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
           targetRole: interview.targetRole,
           roleSkills,
           resumeContext,
+          selectedSkills,
+          selectedSoftSkills,
           questionCount: 0,
           coveredTopics: [],
           durationMinutes: interview.duration,
           previousQuestions: [],
+          previousQuestionTypes: [],
           currentStage: stage,
         }),
       },
@@ -605,7 +815,7 @@ app.post("/api/v1/interview/start/:interviewId", async (req, res) => {
 // INTERVIEW RESPONSE
 // --------------------------------------------------
 
-app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
+app.post("/api/v1/interview/respond/:interviewId", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { message } = req.body;
 
@@ -616,30 +826,25 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       return;
     }
 
-    const { prisma } = await import("./db.ts");
-
-    const interview = await prisma.interview.findUnique({
-      where: {
-        id: req.params.interviewId,
-      },
-      include: {
-        conversations: true,
-      },
-    });
-
-    if (!interview) {
-      res.status(404).json({
-        error: "Interview not found",
-      });
+    // Sanitize + cap before persisting or prompting (prompt-injection and
+    // prompt-bloat protection for untrusted candidate input).
+    const sanitizedAnswer = sanitizeAnswer(message);
+    if (!sanitizedAnswer) {
+      res.status(400).json({ error: "Message content is empty after sanitization" });
       return;
     }
+
+    const { prisma } = await import("./db.ts");
+
+    const interview = await loadOwnedInterview(req, res, String(req.params.interviewId));
+    if (!interview) return;
 
     // Save candidate response
     await prisma.message.create({
       data: {
         interviewId: interview.id,
         type: "User",
-        message,
+        message: sanitizedAnswer,
       },
     });
 
@@ -652,10 +857,10 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
     // Add current candidate response
     conversation.push({
       role: "user",
-      content: message,
+      content: sanitizedAnswer,
     });
 
-  const { roleSkills, resumeContext } = parseJobDesc(interview.jobDescription ?? null);
+    const { roleSkills, resumeContext, selectedSkills, selectedSoftSkills } = parseJobDesc(interview.jobDescription ?? null);
 
     const targets = getDifficultyTargets(interview.difficulty);
     const currentQuestionCount = questionCount(interview.conversations);
@@ -697,6 +902,12 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       (item) => item.type === "Assistant",
     );
 
+    // Question-type history is deterministically inferred from the actual
+    // questions asked, so the prompt's type-rotation rule reflects reality.
+    const previousQuestionTypes: QuestionType[] = previousAssistantMessages.map(
+      (item) => inferQuestionType(item.message),
+    );
+
     const respondTimerLabel = `[respond] OmniRoute (interview ${interview.id}, Q${currentQuestionCount + 1})`;
     console.time(respondTimerLabel);
     const aiResponse = await askOmniRoute([
@@ -711,10 +922,13 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
           targetRole: interview.targetRole,
           roleSkills,
           resumeContext,
+          selectedSkills,
+          selectedSoftSkills,
           questionCount: currentQuestionCount,
           coveredTopics: coveredTopics(interview.conversations),
           durationMinutes: interview.duration,
           previousQuestions: previousAssistantMessages.map((item) => item.message),
+          previousQuestionTypes,
           currentStage: stage,
         }),
       },
@@ -722,7 +936,7 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
         role: "user",
         content: buildTurnInstruction({
           messages: interview.conversations,
-          latestAnswer: message,
+          latestAnswer: sanitizedAnswer,
           difficulty: interview.difficulty,
           currentStage: stage,
           questionCount: currentQuestionCount + 1,
@@ -736,7 +950,61 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
       throw new Error("OmniRoute returned an empty response");
     }
 
-    const decision = parseInterviewDecision(aiResponse, interview.difficulty, stage);
+    let decision = parseInterviewDecision(aiResponse, interview.difficulty, stage);
+
+    // Deterministic repetition guard: if the generated question is a near
+    // duplicate of anything already asked (same wording, reworded, or same
+    // underlying concept), ask the model ONCE for a fresh angle instead of
+    // shipping the repeat. No loop — if the retry is also a duplicate, the
+    // original decision stands.
+    const recentQuestions = previousAssistantMessages.map((item) => item.message);
+    if (decision.question && isNearDuplicateQuestion(decision.question, recentQuestions)) {
+      console.warn(
+        `[respond] Near-duplicate question detected for interview ${interview.id}; requesting a fresh angle.`,
+      );
+      const retryResponse = await askOmniRoute([
+        {
+          role: "system",
+          content: buildInterviewSystemPrompt({
+            githubMetadata: interview.githubMetadata,
+            difficulty: interview.difficulty,
+            targetSkill: interview.targetSkill,
+            selfAssessedLevel: interview.selfAssessedLevel,
+            targetCompany: interview.targetCompany,
+            targetRole: interview.targetRole,
+            roleSkills,
+            resumeContext,
+            selectedSkills,
+            selectedSoftSkills,
+            questionCount: currentQuestionCount,
+            coveredTopics: coveredTopics(interview.conversations),
+            durationMinutes: interview.duration,
+            previousQuestions: recentQuestions,
+            previousQuestionTypes,
+            currentStage: stage,
+          }),
+        },
+        {
+          role: "user",
+          content: `The candidate's latest answer was:
+"${sanitizedAnswer}"
+
+Your previous draft question was:
+"${decision.question}"
+
+That question (or a trivial rewording of it) was ALREADY asked earlier in this interview. Ask a COMPLETELY DIFFERENT question: move to a different selected skill, or explore a new dimension (practical, debugging, architecture, trade-off, or project-grounded). Do NOT re-test the same underlying concept. Keep it 1-2 sentences, conversational, and grounded in the candidate's earlier answers where natural. Return ONLY valid JSON with the same shape as before.`,
+        },
+      ]);
+      if (retryResponse) {
+        const retryDecision = parseInterviewDecision(retryResponse, interview.difficulty, stage);
+        if (
+          retryDecision.question &&
+          !isNearDuplicateQuestion(retryDecision.question, recentQuestions)
+        ) {
+          decision = retryDecision;
+        }
+      }
+    }
 
     // If hard max will be reached on this turn or decision finished:
     const isFinished = decision.finished === true || (isNearEnd && decision.questionType === "wrap-up");
@@ -788,31 +1056,17 @@ app.post("/api/v1/interview/respond/:interviewId", async (req, res) => {
 // INTERVIEW RESULT
 // --------------------------------------------------
 
-app.get("/api/v1/result/:interviewId", async (req, res) => {
+// Per-interview in-flight evaluation promises (single-process race guard).
+const inFlightEvaluations = new Map<string, Promise<void>>();
+
+app.get("/api/v1/result/:interviewId", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
+    const interview = await loadOwnedInterview(req, res, String(req.params.interviewId));
+    if (!interview) return;
+
     const { prisma } = await import("./db.ts");
 
-    const interview = await prisma.interview.findUnique({
-      where: {
-        id: req.params.interviewId,
-      },
-      include: {
-        conversations: true,
-      },
-    });
-
-    if (!interview) {
-      res.status(404).json({
-        error: "Interview not found",
-      });
-      return;
-    }
-
-    let score = interview.score;
-    let feedback = interview.feedback;
-    let status = interview.status;
-
-    const { roleSkills, resumeContext, selectedSkills } = parseJobDesc(
+    const { roleSkills, resumeContext, selectedSkills, selectedSoftSkills } = parseJobDesc(
       interview.jobDescription ?? null,
     );
 
@@ -820,51 +1074,79 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     // marked "Done" without ever being scored (e.g. the hard max-questions
     // completion path sets status "Done" directly without an evaluation).
     if (interview.status !== "Done" || interview.score == null) {
-      const result = await calculateResult(
-        interview.conversations,
-        interview.githubMetadata,
-        {
-          role: interview.targetRole,
-          company: interview.targetCompany,
-          targetSkill: interview.targetSkill,
-          selectedSkills,
-          selfAssessedLevel: interview.selfAssessedLevel,
-          roleSkills,
-          resumeContext,
-        },
-      );
+      // Race guard: result-page polling, refreshes, and multiple tabs can all
+      // hit this endpoint concurrently. Share a single in-flight evaluation
+      // promise per interview so the LLM evaluation runs exactly once; later
+      // requests await the same promise instead of re-triggering the AI call.
+      const existing = inFlightEvaluations.get(interview.id);
+      if (existing) {
+        await existing.catch(() => undefined);
+        return res.redirect(302, req.originalUrl);
+      }
 
-      const updatedInterview = await prisma.interview.update({
-        where: {
-          id: interview.id,
-        },
-        data: {
-          status: "Done",
-          feedback: result.overallFeedback,
-          score: result.score,
-          evaluation: result,
-          strengthsList: result.strengths,
-          weaknessesList: result.weaknesses,
-          recommendations: result.topicsToImprove,
-          completedAt: new Date(),
-        },
+      const evaluationPromise = (async () => {
+        const result = await calculateResult(
+          interview.conversations,
+          interview.githubMetadata,
+          {
+            role: interview.targetRole,
+            company: interview.targetCompany,
+            targetSkill: interview.targetSkill,
+            selectedSkills,
+            selectedSoftSkills,
+            selfAssessedLevel: interview.selfAssessedLevel,
+            roleSkills,
+            resumeContext,
+          },
+        );
+
+        await prisma.interview.update({
+          where: {
+            id: interview.id,
+          },
+          data: {
+            status: "Done",
+            feedback: result.overallFeedback,
+            score: result.score,
+            evaluation: result,
+            strengthsList: result.strengths,
+            weaknessesList: result.weaknesses,
+            recommendations: result.topicsToImprove,
+            completedAt: new Date(),
+          },
+        });
+      })();
+
+      inFlightEvaluations.set(interview.id, evaluationPromise);
+      try {
+        await evaluationPromise;
+      } finally {
+        inFlightEvaluations.delete(interview.id);
+      }
+
+      // Re-read the persisted, freshly evaluated interview so every waiter —
+      // including requests that joined the in-flight promise — gets the same
+      // stored evaluation payload.
+      const evaluated = await prisma.interview.findUnique({
+        where: { id: interview.id },
+        include: { conversations: true },
       });
-
-      score = updatedInterview.score;
-      feedback = updatedInterview.feedback;
-      status = updatedInterview.status;
+      if (!evaluated) {
+        res.status(404).json({ error: "Interview not found" });
+        return;
+      }
 
       res.json({
-        score,
-        feedback,
-        status,
-        evaluation: result,
-        targetSkill: interview.targetSkill,
-        targetRole: interview.targetRole,
-        targetCompany: interview.targetCompany,
-        selfAssessedLevel: interview.selfAssessedLevel,
+        score: evaluated.score,
+        feedback: evaluated.feedback,
+        status: evaluated.status,
+        evaluation: evaluated.evaluation,
+        targetSkill: evaluated.targetSkill,
+        targetRole: evaluated.targetRole,
+        targetCompany: evaluated.targetCompany,
+        selfAssessedLevel: evaluated.selfAssessedLevel,
         roleSkills,
-        transcript: interview.conversations.map((conversation) => ({
+        transcript: evaluated.conversations.map((conversation) => ({
           type: conversation.type,
           content: conversation.message,
           createdAt: conversation.createdAt,
@@ -874,9 +1156,9 @@ app.get("/api/v1/result/:interviewId", async (req, res) => {
     }
 
     res.json({
-      score,
-      feedback,
-      status,
+      score: interview.score,
+      feedback: interview.feedback,
+      status: interview.status,
       evaluation: interview.evaluation,
       targetSkill: interview.targetSkill,
       targetRole: interview.targetRole,
