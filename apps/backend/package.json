@@ -13,13 +13,10 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@google/genai": "^2.8.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
-    "@types/pdf-parse": "^1.1.5",
-    "@types/ws": "^8.18.1",
     "axios": "^1.16.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -27,19 +24,16 @@
     "express-rate-limit": "^8.2.1",
     "firebase-admin": "^13.6.0",
     "https-proxy-agent": "^9.0.0",
-    "pdf-lib": "^1.17.1",
-    "pdf-parse": "1.1.1",
     "pg": "^8.20.0",
-    "playwright": "^1.60.0",
     "unpdf": "^1.8.1",
-    "ws": "^8.20.1",
-    "zod": "^4.4.3",
-    "zod-to-json-schema": "^3.25.2"
+    "zod": "^4.4.3"
   },
   "scripts": {
     "dev": "bun --watch index.ts",
     "start": "bun index.ts",
+    "build": "prisma generate",
     "prisma": "prisma",
-    "generate": "prisma generate"
+    "generate": "prisma generate",
+    "migrate:deploy": "prisma migrate deploy"
   }
 }

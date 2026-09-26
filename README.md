@@ -52,7 +52,6 @@
 | Database            | PostgreSQL + Prisma                                                         |
 | Repository          | [ItsKartik12/ai-interviewer](https://github.com/ItsKartik12/ai-interviewer) |
 | Primary purpose     | Candidate assessment and structured skill evaluation                        |
-| Integration goal    | Larger SIH / career-development platform                                    |
 
 </details>
 
@@ -842,6 +841,57 @@ If working with an existing database, **do not reset the database just to solve 
 
 ---
 
+# 🚢 Deployment
+
+## Frontend (Vercel)
+
+1. Import the repo into Vercel, set the root directory to `apps/frontend`.
+2. Set the environment variable:
+   ```
+   PUBLIC_BACKEND_URL=https://<your-backend-host>
+   PUBLIC_FIREBASE_API_KEY=<firebase web api key>
+   PUBLIC_FIREBASE_AUTH_DOMAIN=<project>.firebaseapp.com
+   PUBLIC_FIREBASE_PROJECT_ID=<firebase project id>
+   PUBLIC_FIREBASE_STORAGE_BUCKET=<bucket>
+   PUBLIC_FIREBASE_MESSAGING_SENDER_ID=<sender id>
+   PUBLIC_FIREBASE_APP_ID=<app id>
+   ```
+   (`PUBLIC_FIREBASE_*` values are the standard Firebase web config — safe to expose; they identify the project, they do not authenticate anyone.)
+3. Deep links (`/interview/:id`, `/result/:id`, `/history`) work on refresh via the SPA rewrite in `vercel.json`.
+
+## Backend (Render or similar)
+
+1. Create a Web Service, root directory `apps/backend`, build command `bun install && bun run build` (runs `prisma generate`), start command `bun index.ts`.
+2. Set environment variables:
+   ```
+   NODE_ENV=production
+   PORT=3001
+   FRONTEND_URL=https://<your-vercel-app>.vercel.app
+   DATABASE_URL=<production postgres url>
+   AI_PROVIDER=gemini
+   GEMINI_API_KEY=<key>
+   DEEPGRAM_API_KEY=<key>
+   FIREBASE_PROJECT_ID=<id>
+   FIREBASE_CLIENT_EMAIL=<service-account email>
+   FIREBASE_PRIVATE_KEY=<private key with literal \n escapes>
+   ```
+3. Run migrations once against the production database: `bunx prisma migrate deploy`.
+4. Health check endpoint: `GET /health`.
+
+Notes:
+- In production, CORS allows only the origins listed in `FRONTEND_URL` (comma-separated). The localhost allowances are development-only.
+- OmniRoute is a local development gateway — in production use `AI_PROVIDER=gemini` so the backend calls Gemini directly. The fallback chain remains intact.
+- Microphone access requires HTTPS, which both Vercel and Render provide automatically.
+- The `DEEPGRAM_API_KEY` master key never leaves the backend; the browser only ever receives short-lived (600s), `usage:write`-scoped tokens.
+
+## Firebase Console setup (one-time)
+
+1. Enable the **Email/Password** sign-in provider.
+2. Add your deployed frontend domain under **Authentication → Settings → Authorized domains**.
+3. Generate a service account key for the backend Admin SDK environment variables above.
+
+---
+
 # 🤖 OmniRoute Setup
 
 OmniRoute acts as the LLM gateway.
@@ -1007,60 +1057,10 @@ The backend should control access to external providers.
 
 ---
 
-# 🔌 Integration with the Main SIH Platform
+# 📦 Structured Assessment Output
 
-AI Interviewer is designed to become a module inside a larger candidate-development platform.
-
-The separation is intentional.
-
-### AI Interviewer owns
-
-- Interview execution
-- Question generation
-- Adaptive difficulty
-- Voice interaction
-- Answer analysis
-- Skill assessment
-- Evidence generation
-
-### Main SIH Platform owns
-
-- Candidate identity
-- Master candidate profile
-- Job/opportunity matching
-- Learning recommendations
-- Long-term skill progress
-
-The integration should look like:
-
-```text
-                  MAIN SIH PLATFORM
-                         │
-                         │ candidate context
-                         ▼
-                 ┌───────────────┐
-                 │ AI Interviewer│
-                 └───────┬───────┘
-                         │
-                  Interview Session
-                         │
-                         ▼
-                 Structured Assessment
-                         │
-                         ▼
-                  MAIN SIH PLATFORM
-                         │
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-         Skill Gap    Job Match   Learning
-         Analysis                 Plan
-```
-
----
-
-# 📦 Future Assessment Contract
-
-A clean integration payload can look like:
+Every completed interview produces a structured, evidence-based evaluation that is
+persisted to PostgreSQL and rendered on the results page:
 
 ```json
 {
@@ -1087,7 +1087,8 @@ A clean integration payload can look like:
 }
 ```
 
-The exact schema can be finalized when the main SIH backend integration begins.
+Skills that were never tested are listed as **not assessed** — they are never
+invented, and never scored as zero.
 
 ---
 
@@ -1217,9 +1218,6 @@ Current/future improvement areas include:
 - Interview comparison over time
 - Human interviewer review
 - Production monitoring
-- Production deployment
-- Main-platform authentication integration
-- Full SIH backend integration
 
 Company-specific interview content should rely on reliable public information and should never claim access to confidential interview questions.
 
@@ -1270,16 +1268,12 @@ Company-specific interview content should rely on reliable public information an
 </details>
 
 <details>
-<summary><strong>Phase 4 — SIH Integration</strong></summary>
+<summary><strong>Phase 4 — Accounts & Progression</strong></summary>
 
-- [ ] Finalize assessment API contract
-- [ ] Connect candidate identity
-- [ ] Send structured skill assessment
-- [ ] Consume assessment in SIH backend
-- [ ] Skill-gap analysis
-- [ ] Learning recommendations
-- [ ] Job/opportunity matching
-- [ ] Long-term candidate skill history
+- [x] Firebase Authentication (email/password)
+- [x] Persistent user profiles
+- [x] Interview results history
+- [x] Score & skill progression charts
 
 </details>
 
@@ -1289,11 +1283,8 @@ Company-specific interview content should rely on reliable public information an
 - [ ] Production deployment
 - [ ] Secure secret management
 - [ ] Monitoring
-- [ ] Rate limiting
 - [ ] Error tracking
-- [ ] Production database
 - [ ] Performance optimization
-- [ ] Final hackathon demo flow
 
 </details>
 
@@ -1332,7 +1323,7 @@ Also verify the licenses of third-party libraries, tutorials, reference implemen
 
 **Adaptive AI Interviewing + Voice Interaction + Skill Assessment**
 
-Built for a larger SIH-oriented candidate development platform.
+A standalone, full-stack AI mock interview platform.
 
 <br>
 

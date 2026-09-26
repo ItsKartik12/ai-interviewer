@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import axios from "axios";
+import { api } from "@/lib/api";
 import { useNavigate, useParams } from "react-router";
+// api instance carries the Firebase ID token on every request
 import {
   Activity,
   AlertCircle,
@@ -16,7 +17,6 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import { BACKEND_URL } from "@/lib/config";
 import { Button } from "./ui/button";
 import { VoiceOrb } from "./VoiceOrb";
 
@@ -180,6 +180,32 @@ export function Interview() {
   const [interimTranscript, setInterimTranscript] = useState("");
   const [submittedAnswer, setSubmittedAnswer] = useState("");
   const [question, setQuestion] = useState("");
+
+  /**
+   * Defensive UI guard: the backend should never send raw JSON as the
+   * candidate-facing question (the parser rescues malformed JSON server-side).
+   * If it ever does (or an unparsed blob slips through), extract the question
+   * field instead of displaying the JSON blob. Metadata (answerQuality, stage,
+   * topic…) stays internal and is never rendered as the question.
+   */
+  function safeQuestion(raw: unknown): string {
+    if (typeof raw !== "string" || !raw.trim()) return "";
+    const text = raw.trim();
+    if (text.startsWith("{") && text.includes("\"question\"")) {
+      try {
+        const parsed = JSON.parse(
+          text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, ""),
+        ) as { question?: unknown };
+        if (typeof parsed.question === "string" && parsed.question.trim()) {
+          return parsed.question.trim();
+        }
+      } catch {
+        /* fall through to generic line below */
+      }
+      return "Could you walk me through your reasoning on that?";
+    }
+    return text;
+  }
   const [context, setContext] = useState<InterviewContext>({});
   const [aiLevel, setAiLevel] = useState(0);
   const [userLevel, setUserLevel] = useState(0);
@@ -668,8 +694,8 @@ export function Interview() {
       }));
 
       // 3. Request fresh Deepgram temporary token (TTL: 600s)
-      const tokenResponse = await axios.post(
-        `${BACKEND_URL}/api/v1/deepgram-token`,
+      const tokenResponse = await api.post(
+        "/api/v1/deepgram-token",
       );
       const deepgramToken = tokenResponse.data?.token;
       if (!deepgramToken)
@@ -859,8 +885,8 @@ export function Interview() {
 
         let voiceReady = false;
         try {
-          const tokenResponse = await axios.post(
-            `${BACKEND_URL}/api/v1/deepgram-token`,
+          const tokenResponse = await api.post(
+            "/api/v1/deepgram-token",
           );
           if (!isCurrentSession()) return;
           const deepgramToken = tokenResponse.data?.token;
@@ -885,21 +911,22 @@ export function Interview() {
         }
 
         // 8. Fetch initial interview question (continues even if voice is offline)
-        const response = await axios.post(
-          `${BACKEND_URL}/api/v1/interview/start/${interviewId}`,
+        const response = await api.post(
+          `/api/v1/interview/start/${interviewId}`,
         );
         if (!isCurrentSession()) return;
         const data = response.data as {
           message?: string;
         } & InterviewContext;
 
-        setQuestion(data.message ?? "");
+        const firstQuestion = safeQuestion(data.message);
+        setQuestion(firstQuestion);
         setContext(data);
         if ((data as any).minQuestions) setMinQuestions((data as any).minQuestions);
         if ((data as any).maxQuestions) setMaxQuestions((data as any).maxQuestions);
-        if (data.message) {
-          setConversationLog((prev) => [...prev, { role: "ai", text: data.message! }]);
-          speakAI(data.message);
+        if (firstQuestion) {
+          setConversationLog((prev) => [...prev, { role: "ai", text: firstQuestion }]);
+          speakAI(firstQuestion);
         }
         if (isCurrentSession() && !window.speechSynthesis.speaking) {
           setStatus("listening");
@@ -958,8 +985,8 @@ export function Interview() {
     setDiagnostics((prev) => ({ ...prev, transcriptStatus: "waiting" }));
 
     try {
-      const response = await axios.post(
-        `${BACKEND_URL}/api/v1/interview/respond/${interviewId}`,
+      const response = await api.post(
+        `/api/v1/interview/respond/${interviewId}`,
         { message: answer },
       );
 
@@ -970,7 +997,7 @@ export function Interview() {
         return;
       }
 
-      const nextQuestion = response.data.message as string;
+      const nextQuestion = safeQuestion(response.data.message);
       setQuestion(nextQuestion);
       setQuestionNumber((prev) => prev + 1);
       if (response.data.minQuestions) setMinQuestions(response.data.minQuestions);
@@ -1122,7 +1149,7 @@ export function Interview() {
   return (
     <main className="flex min-h-screen flex-col bg-background">
       {/* ── Top Bar ── */}
-      <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/95">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
@@ -1275,7 +1302,7 @@ export function Interview() {
         <div className="flex flex-col gap-5">
 
           {/* Voice Orbs */}
-          <div className="flex items-center justify-center gap-10 rounded-2xl border border-border bg-card/60 py-6 shadow-sm">
+          <div className="animate-fade-in flex items-center justify-center gap-10 rounded-2xl border border-border bg-card/60 py-6 shadow-sm">
             <VoiceOrb
               level={aiLevel}
               speaking={aiSpeaking}
@@ -1303,7 +1330,7 @@ export function Interview() {
 
           {/* Current Question Card */}
           {status === "submitting" ? (
-            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
+            <div className="animate-fade-in rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4">
                 <Loader2 className="size-4 animate-spin text-primary" />
                 <span className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Processing</span>
@@ -1329,7 +1356,7 @@ export function Interview() {
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
+            <div key={questionNumber} className="animate-fade-up rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
               <div className="flex flex-wrap items-center gap-2 mb-3">
                 <span className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
                   Question {questionNumber}
@@ -1362,7 +1389,7 @@ export function Interview() {
 
 
           {/* Answer Area */}
-          <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
+          <div className="animate-fade-in rounded-2xl border border-border bg-card/80 p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Your Answer</p>
@@ -1482,8 +1509,8 @@ export function Interview() {
                 <div key={i} className={`flex gap-2 ${turn.role === "ai" ? "justify-start" : "flex-row-reverse"}`}>
                   <div className={`grid size-6 shrink-0 place-items-center rounded-full ${
                     turn.role === "ai"
-                      ? "bg-gradient-to-br from-violet-500 to-indigo-600 text-white"
-                      : "bg-gradient-to-br from-emerald-400 to-teal-600 text-white"
+                      ? "bg-indigo-500 text-white"
+                      : "bg-emerald-500 text-white"
                   }`}>
                     {turn.role === "ai" ? <Bot className="size-3" /> : <User className="size-3" />}
                   </div>
@@ -1504,7 +1531,7 @@ export function Interview() {
             {/* AI thinking indicator — shown while waiting for the LLM response */}
             {status === "submitting" && (
               <div className="flex gap-2 justify-start">
-                <div className="grid size-6 shrink-0 place-items-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white">
+                <div className="grid size-6 shrink-0 place-items-center rounded-full bg-indigo-500 text-white">
                   <Bot className="size-3" />
                 </div>
                 <div className="rounded-2xl rounded-tl-sm border border-border bg-white px-3 py-2.5 text-[11px] shadow-xs">

@@ -132,6 +132,9 @@ const result = await Bun.build({
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
+  // Inline literal process.env.PUBLIC_* references into the browser bundle
+  // (Bun only replaces literal `process.env.FOO`, never `process.env[name]`).
+  env: "PUBLIC_*",
   ...cliConfig,
 });
 

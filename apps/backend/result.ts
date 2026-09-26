@@ -16,8 +16,14 @@ export type NotAssessedSkill = {
 
 export type AssessedSoftSkill = {
   skill: string;
+  score: number; // 0-100, evidence-based
   assessment: string;
   evidence: string;
+};
+
+export type NotAssessedSoftSkill = {
+  skill: string;
+  reason: string;
 };
 
 export type InterviewEvaluation = {
@@ -29,6 +35,7 @@ export type InterviewEvaluation = {
   notAssessedSkills: NotAssessedSkill[];
   technicalSkills: AssessedSkill[]; // Alias for compatibility
   softSkills: AssessedSoftSkill[];
+  notAssessedSoftSkills: NotAssessedSoftSkill[];
   overallStrengths: string[];
   overallWeaknesses: string[];
   topicsToImprove: string[];
@@ -64,6 +71,7 @@ function parseEvaluation(
   response: string,
   fallbackLevel: "Beginner" | "Intermediate" | "Advanced" = "Intermediate",
   knownSelectedSkills: string[] = [],
+  knownSelectedSoftSkills: string[] = [],
 ): InterviewEvaluation {
   const candidate = response
     .replace(/^```(?:json)?\s*/i, "")
@@ -155,25 +163,71 @@ function parseEvaluation(
     }
   }
 
-  // Parse soft skills assessed
-  const softSkills: AssessedSoftSkill[] = Array.isArray(parsed.softSkills)
-    ? parsed.softSkills.map((item: any) => ({
-        skill: String(item.skill || "Communication"),
-        assessment: String(item.assessment || "Demonstrated in conversation."),
-        evidence: String(item.evidence || "Observed during responses."),
-      }))
-    : [
-        {
-          skill: "Technical Communication",
-          assessment: "Articulated technical thoughts during questioning.",
-          evidence: "Demonstrated across conversation turns.",
-        },
-        {
-          skill: "Problem Solving",
-          assessment: "Approached scenario questions with structured reasoning.",
-          evidence: "Observed in answer progression.",
-        },
-      ];
+  // Parse soft skills assessed — scored 0-100, evidence-gated.
+  const rawSoft = Array.isArray(parsed.softSkills) ? parsed.softSkills : [];
+  const softSkills: AssessedSoftSkill[] = rawSoft
+    .map((item: any) => ({
+      skill: String(item?.skill || "").trim(),
+      // Require an explicit finite number: clamp(null) would coerce to 0 and
+      // let a fabricated zero slip through the evidence gate.
+      score:
+        typeof item?.score === "number" && Number.isFinite(item.score)
+          ? Math.max(0, Math.min(100, Math.round(item.score)))
+          : -1,
+      assessment: String(item?.assessment || "").trim(),
+      evidence: String(item?.evidence || "").trim(),
+    }))
+    .filter((s: AssessedSoftSkill) => s.skill)
+    // EVIDENCE GATE: a soft skill is only scored when the evaluator could
+    // cite concrete transcript evidence AND supplied a valid 0-100 score.
+    // Anything else degrades to Not Assessed — never a fabricated 0.
+    .filter((s: AssessedSoftSkill) => s.score >= 0 && s.evidence.length >= 20);
+
+  const softAssessedNames = new Set(
+    softSkills.map((s) => s.skill.trim().toLowerCase()),
+  );
+
+  // Soft skills the candidate selected but the interview produced no citable
+  // evidence for must surface as Not Assessed (with reason), never scored.
+  const notAssessedSoftSkills: NotAssessedSoftSkill[] = [];
+  const rawNotAssessedSoft = Array.isArray(parsed.notAssessedSoftSkills)
+    ? parsed.notAssessedSoftSkills
+    : [];
+  for (const item of rawNotAssessedSoft) {
+    const name =
+      item && typeof item === "object" && typeof item.skill === "string"
+        ? item.skill.trim()
+        : typeof item === "string"
+          ? item.trim()
+          : "";
+    if (!name) continue;
+    if (softAssessedNames.has(name.toLowerCase())) continue;
+    if (notAssessedSoftSkills.some((s) => s.skill.toLowerCase() === name.toLowerCase()))
+      continue;
+    notAssessedSoftSkills.push({
+      skill: name,
+      reason:
+        item && typeof item === "object" && typeof item.reason === "string" && item.reason.trim()
+          ? item.reason.trim()
+          : "Not assessed — no sufficient evidence in this interview session",
+    });
+  }
+  // Ensure every known selected soft skill is accounted for.
+  for (const selected of knownSelectedSoftSkills) {
+    const norm = selected.trim().toLowerCase();
+    const isAssessed = Array.from(softAssessedNames).some(
+      (assessed) => assessed.includes(norm) || norm.includes(assessed),
+    );
+    if (
+      !isAssessed &&
+      !notAssessedSoftSkills.some((s) => s.skill.trim().toLowerCase() === norm)
+    ) {
+      notAssessedSoftSkills.push({
+        skill: selected.trim(),
+        reason: "Not covered in this interview session",
+      });
+    }
+  }
 
   const overallStrengths = stringList(parsed.overallStrengths || parsed.strengths, 6);
   const overallWeaknesses = stringList(parsed.overallWeaknesses || parsed.weaknesses, 6);
@@ -193,6 +247,7 @@ function parseEvaluation(
     notAssessedSkills,
     technicalSkills: assessedSkills,
     softSkills,
+    notAssessedSoftSkills,
     overallStrengths,
     overallWeaknesses,
     topicsToImprove,
@@ -219,6 +274,30 @@ export async function calculateResult(
     company?: string | null;
     targetSkill?: string | null;
     selectedSkills?: string[] | null;
+    selectedSoftSkills?: string[] | null;
+    selfAssessedLevel?: string | null;
+    roleSkills?: unknown;
+    resumeContext?: { technologies?: string[] } | null;
+  },
+): Promise<InterviewEvaluation> {
+  return calculateResultWithAi(askOmniRoute, messages, githubMetadata, context);
+}
+
+/**
+ * Core evaluation implementation. Injectable `ai` requester keeps the
+ * evidence-based evaluation logic testable and lets the result route pass
+ * a low-temperature, JSON-mode request through the existing provider router.
+ */
+export async function calculateResultWithAi(
+  ai: (messages: { role: "system" | "user" | "assistant"; content: string }[], options?: { temperature?: number; jsonOutput?: boolean }) => Promise<string>,
+  messages: { type: "Assistant" | "User"; message: string; createdAt: Date }[],
+  githubMetadata: unknown,
+  context?: {
+    role?: string | null;
+    company?: string | null;
+    targetSkill?: string | null;
+    selectedSkills?: string[] | null;
+    selectedSoftSkills?: string[] | null;
     selfAssessedLevel?: string | null;
     roleSkills?: unknown;
     resumeContext?: { technologies?: string[] } | null;
@@ -260,6 +339,16 @@ export async function calculateResult(
     selectedSkillsList.push(...allRecommendedSkills.slice(0, 3));
   }
 
+  // Selected soft skills to evaluate (fall back to standard defaults when the
+  // candidate made no explicit selection).
+  const selectedSoftSkillsList =
+    Array.isArray(context?.selectedSoftSkills) &&
+    context.selectedSoftSkills.some((s) => typeof s === "string" && s.trim())
+      ? context.selectedSoftSkills.filter(
+          (s): s is string => typeof s === "string" && s.trim().length > 0,
+        )
+      : ["Technical Communication", "Problem Solving"];
+
   const systemPrompt = `You are a rigorous, evidence-based principal engineering interviewer conducting the final evaluation of an interview.
 
 Target Role Profile:
@@ -284,7 +373,13 @@ CRITICAL EVALUATION GUIDELINES (EVIDENCE-BASED EVALUATION):
    - List concrete strengths and weaknesses observed.
    - Quote or cite specific evidence from the candidate's actual answers.
 
-4. Evaluate soft skills (Communication, Problem Solving, Structure) based on their actual phrasing and clarity.
+4. Evaluate the candidate's SELECTED soft skills (${JSON.stringify(
+         selectedSoftSkillsList.length > 0
+           ? selectedSoftSkillsList
+           : ["Technical Communication", "Problem Solving"],
+       )}) based ONLY on observable evidence in the transcript (clarity of explanations, structured reasoning, how they describe collaboration, conflict, ownership, adaptability).
+   - For each soft skill with sufficient evidence: include it in "softSkills" with a realistic 0-100 score, a concise assessment, and a concrete evidence citation (quote or describe the specific answer).
+   - If a selected soft skill has NO sufficient evidence in the transcript (it was never probed or the answers were too thin to judge), put it in "notAssessedSoftSkills" with a reason. NEVER assign it a fabricated score and NEVER use 0 as a placeholder.
 5. Overall score must be derived ONLY from assessed skills and discussion depth (not from untested skills or GitHub repo presence).
 
 Return ONLY valid JSON with this exact shape:
@@ -309,9 +404,16 @@ Return ONLY valid JSON with this exact shape:
   ],
   "softSkills": [
     {
-      "skill": "Technical Communication / Problem Solving",
+      "skill": "Assessed soft skill name",
+      "score": 0-100 integer,
       "assessment": "concise observation",
-      "evidence": "observed in response to question X"
+      "evidence": "concrete quotation or observed proof from the candidate's answers (required — at least one specific moment)"
+    }
+  ],
+  "notAssessedSoftSkills": [
+    {
+      "skill": "Selected soft skill without sufficient evidence",
+      "reason": "Not assessed — no sufficient evidence in this interview session"
     }
   ],
   "overallStrengths": ["strength 1", "strength 2"],
@@ -320,24 +422,29 @@ Return ONLY valid JSON with this exact shape:
   "overallFeedback": "3-4 sentences of supportive, realistic, evidence-based feedback"
 }`;
 
-  const response = await askOmniRoute([
-    { role: "system", content: systemPrompt },
-    {
-      role: "user",
-      content: JSON.stringify({
-        githubContext: githubMetadata ?? null,
-        transcript: messages.map((m) => ({
-          speaker: m.type === "Assistant" ? "interviewer" : "candidate",
-          message: m.message,
-        })),
-      }),
-    },
-  ]);
+  // Evaluation consistency: low temperature + native JSON output (Gemini path).
+  // Provider fallback remains fully intact through the injected requester.
+  const response = await ai(
+    [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: JSON.stringify({
+          githubContext: githubMetadata ?? null,
+          transcript: messages.map((m) => ({
+            speaker: m.type === "Assistant" ? "interviewer" : "candidate",
+            message: m.message,
+          })),
+        }),
+      },
+    ],
+    { temperature: 0.2, jsonOutput: true },
+  );
 
   try {
-    return parseEvaluation(response, fallbackLevel, selectedSkillsList);
+    return parseEvaluation(response, fallbackLevel, selectedSkillsList, selectedSoftSkillsList);
   } catch (error) {
     console.error("AI evaluation parse error, using safe fallback structure:", error);
-    return parseEvaluation("{}", fallbackLevel, selectedSkillsList);
+    return parseEvaluation("{}", fallbackLevel, selectedSkillsList, selectedSoftSkillsList);
   }
 }

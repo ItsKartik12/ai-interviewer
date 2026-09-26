@@ -15,15 +15,13 @@ interface VoiceOrbProps {
 
 const ACCENTS = {
   violet: {
-    core: "from-indigo-500 to-indigo-700",
-    glow: "99, 102, 241",
+    core: "bg-indigo-500",
     ring: "border-indigo-400/30",
     text: "text-indigo-600",
     bars: "bg-indigo-500",
   },
   emerald: {
-    core: "from-emerald-500 to-teal-700",
-    glow: "16, 185, 129",
+    core: "bg-emerald-500",
     ring: "border-emerald-400/30",
     text: "text-emerald-600",
     bars: "bg-emerald-500",
@@ -41,7 +39,6 @@ export function VoiceOrb({
   const a = ACCENTS[accent];
   const clamped = Math.min(1, Math.max(0, level));
   const scale = 1 + clamped * 0.4;
-  const glowSize = 16 + clamped * 90;
   const Icon_ = Icon;
 
   return (
@@ -66,15 +63,14 @@ export function VoiceOrb({
             opacity: 0.4 + clamped * 0.4,
           }}
         />
-        {/* Core orb */}
+        {/* Core orb — volume feedback via scale; no glow per design system */}
         <div
           className={cn(
-            "relative grid h-28 w-28 place-items-center rounded-full bg-linear-to-br text-white transition-transform duration-100",
+            "relative grid h-28 w-28 place-items-center rounded-full text-white transition-transform duration-100",
             a.core,
           )}
           style={{
             transform: `scale(${scale})`,
-            boxShadow: `0 0 ${glowSize}px rgba(${a.glow}, ${0.35 + clamped * 0.5})`,
           }}
         >
           <Icon_ className="size-10" strokeWidth={1.75} />

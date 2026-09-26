@@ -2,8 +2,8 @@ const OMNIROUTE_API_KEY = process.env.OMNIROUTE_API_KEY;
 const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "oc/big-pickle";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const DEFAULT_OMNI_TIMEOUT_MS = 8_000;
-const GEMINI_TIMEOUT_MS = 15_000;
+const DEFAULT_OMNI_TIMEOUT_MS = 25_000;
+const GEMINI_TIMEOUT_MS = 25_000;
 
 export type OmniRouteResponse = {
   error?: {
@@ -28,6 +28,10 @@ export type AskAiOptions = {
   omniTimeoutMs?: number;
   omniUrl?: string;
   omniModel?: string;
+  /** Sampling temperature override (e.g. 0.2 for deterministic evaluation). */
+  temperature?: number;
+  /** Ask Gemini for native JSON output (ignored by OmniRoute/OpenAI-compatible path). */
+  jsonOutput?: boolean;
 };
 
 /**
@@ -56,7 +60,10 @@ function getGeminiKey(): string | undefined {
  * Used as safe default or automatic fallback when OmniRoute is unavailable,
  * returns an error (401, 403, 429, 5xx), or times out.
  */
-export async function callGeminiDirect(messages: MessageItem[]): Promise<string> {
+export async function callGeminiDirect(
+  messages: MessageItem[],
+  options?: { temperature?: number; jsonOutput?: boolean },
+): Promise<string> {
   const apiKey = getGeminiKey();
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not configured for Gemini fallback.");
@@ -81,8 +88,9 @@ export async function callGeminiDirect(messages: MessageItem[]): Promise<string>
   const requestBody: Record<string, unknown> = {
     contents: conversationTurns,
     generationConfig: {
-      temperature: 0.7,
+      temperature: options?.temperature ?? 0.7,
       maxOutputTokens: 2048,
+      ...(options?.jsonOutput ? { responseMimeType: "application/json" } : {}),
     },
   };
 
@@ -187,7 +195,7 @@ async function callOmniRouteInternal(
   const requestBody = {
     model: omniModel,
     messages,
-    temperature: 0.7,
+    temperature: options?.temperature ?? 0.7,
   };
 
   const controller = new AbortController();
@@ -267,7 +275,7 @@ export async function askOmniRoute(
   if (configuredProvider === "gemini") {
     if (geminiKey) {
       try {
-        return await callGeminiDirect(messages);
+        return await callGeminiDirect(messages, options);
       } catch (geminiError: any) {
         console.warn("[ai-router] Primary Gemini request failed:", geminiError?.message || geminiError);
         if (omniKey) {
@@ -295,7 +303,7 @@ export async function askOmniRoute(
       if (geminiKey) {
         console.warn("[ai-router] Immediately falling back to direct Gemini...");
         try {
-          return await callGeminiDirect(messages);
+          return await callGeminiDirect(messages, options);
         } catch (geminiError: any) {
           console.error("[ai-router] Gemini fallback also failed:", geminiError);
           throw new Error(
@@ -315,7 +323,7 @@ export async function askOmniRoute(
    * --------------------------------------------------------- */
   if (geminiKey) {
     console.warn("[ai-router] OMNIROUTE_API_KEY missing. Using Gemini direct.");
-    return await callGeminiDirect(messages);
+    return await callGeminiDirect(messages, options);
   }
 
   throw new Error(
