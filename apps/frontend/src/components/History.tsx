@@ -6,7 +6,9 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  Minus,
   Sparkles,
+  TrendingDown,
   TrendingUp,
 } from "lucide-react";
 import {
@@ -24,14 +26,15 @@ import { Button } from "./ui/button";
 import { PageShell, SectionHeading, Skeleton, StatCard } from "./ui/shared";
 import { cn } from "@/lib/utils";
 
-type HistoryEvaluation = {
+export type HistoryEvaluation = {
   score?: number;
   assessedSkills?: { skill: string; score: number }[];
-  softSkills?: { skill: string; assessment?: string; evidence?: string }[];
+  technicalSkills?: { skill: string; score: number }[];
+  softSkills?: { skill: string; score?: number; assessment?: string; evidence?: string }[];
   notAssessedSkills?: { skill: string; reason: string }[];
 };
 
-type HistoryInterview = {
+export type HistoryInterview = {
   id: string;
   role: string;
   targetRole: string | null;
@@ -42,7 +45,7 @@ type HistoryInterview = {
   feedback: string | null;
   strengthsList: string[];
   weaknessesList: string[];
-  evaluation: HistoryEvaluation | null;
+  evaluation: HistoryEvaluation | string | null;
   completedAt: string | null;
   createdAt: string;
 };
@@ -63,6 +66,73 @@ function scoreTier(score: number): { label: string; className: string } {
   return { label: "Foundational", className: "text-rose-500 border-rose-500/30 bg-rose-500/10" };
 }
 
+/**
+ * Extracts and normalizes assessed skills from an interview record.
+ * Handles both assessedSkills and technicalSkills arrays, JSON string evaluations,
+ * trimmed/case-deduplicated names, and falls back to targetSkill if present.
+ */
+export function extractAssessedSkills(
+  interview: HistoryInterview,
+): { skill: string; score: number }[] {
+  let ev: any = interview.evaluation;
+  if (typeof ev === "string") {
+    try {
+      ev = JSON.parse(ev);
+    } catch {
+      ev = null;
+    }
+  }
+
+  const rawList: any[] =
+    Array.isArray(ev?.assessedSkills) && ev.assessedSkills.length > 0
+      ? ev.assessedSkills
+      : Array.isArray(ev?.technicalSkills) && ev.technicalSkills.length > 0
+        ? ev.technicalSkills
+        : [];
+
+  const result: { skill: string; score: number }[] = [];
+  const seen = new Set<string>();
+
+  for (const item of rawList) {
+    if (!item) continue;
+    const name = typeof item.skill === "string" ? item.skill.trim() : "";
+    const score =
+      typeof item.score === "number" && Number.isFinite(item.score)
+        ? Math.max(0, Math.min(100, Math.round(item.score)))
+        : null;
+    if (name && score !== null && !seen.has(name.toLowerCase())) {
+      seen.add(name.toLowerCase());
+      result.push({ skill: name, score });
+    }
+  }
+
+  // Evidence-scored soft skills
+  if (Array.isArray(ev?.softSkills)) {
+    for (const item of ev.softSkills) {
+      if (!item) continue;
+      const name = typeof item.skill === "string" ? item.skill.trim() : "";
+      const score =
+        typeof item.score === "number" && Number.isFinite(item.score)
+          ? Math.max(0, Math.min(100, Math.round(item.score)))
+          : null;
+      if (name && score !== null && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        result.push({ skill: name, score });
+      }
+    }
+  }
+
+  // Fallback: interview targetSkill with overall score if no itemized list
+  if (result.length === 0 && interview.targetSkill && interview.score !== null) {
+    const name = interview.targetSkill.trim();
+    if (name) {
+      result.push({ skill: name, score: interview.score });
+    }
+  }
+
+  return result;
+}
+
 export function History() {
   const navigate = useNavigate();
   const [interviews, setInterviews] = useState<HistoryInterview[]>([]);
@@ -79,10 +149,11 @@ export function History() {
         if (cancelled) return;
         const list = (res.data?.interviews ?? []) as HistoryInterview[];
         setInterviews(list);
+
         // Default chart selection: up to 3 most frequently assessed skills.
         const counts = new Map<string, number>();
         for (const item of list) {
-          for (const s of item.evaluation?.assessedSkills ?? []) {
+          for (const s of extractAssessedSkills(item)) {
             counts.set(s.skill, (counts.get(s.skill) ?? 0) + 1);
           }
         }
@@ -104,9 +175,12 @@ export function History() {
 
   // Chronological order (oldest → newest) for progression charts.
   const chronological = useMemo(
-    () => [...interviews].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    ),
+    () =>
+      [...interviews].sort(
+        (a, b) =>
+          new Date(a.completedAt ?? a.createdAt).getTime() -
+          new Date(b.completedAt ?? b.createdAt).getTime(),
+      ),
     [interviews],
   );
 
@@ -121,17 +195,19 @@ export function History() {
     [chronological],
   );
 
-  // All skills ever assessed (for the picker).
+  // All skills ever assessed (for the picker and baseline).
   const allSkills = useMemo(() => {
     const set = new Set<string>();
     for (const item of chronological) {
-      for (const s of item.evaluation?.assessedSkills ?? []) set.add(s.skill);
+      for (const s of extractAssessedSkills(item)) {
+        set.add(s.skill);
+      }
     }
-    return [...set].sort();
+    return [...set].sort((a, b) => a.localeCompare(b));
   }, [chronological]);
 
   // Skill progression: a point exists ONLY where the skill was actually
-  // assessed — untested skills are omitted (never plotted as 0).
+  // assessed — untested skills are omitted (null, never plotted as 0).
   const skillSeries = useMemo(() => {
     const selected = selectedSkills.slice(0, 5);
     return chronological.map((item, index) => {
@@ -140,14 +216,44 @@ export function History() {
         date: formatDate(item.completedAt ?? item.createdAt),
       };
       const assessed = new Map(
-        (item.evaluation?.assessedSkills ?? []).map((s) => [s.skill, s.score]),
+        extractAssessedSkills(item).map((s) => [s.skill.toLowerCase(), s.score]),
       );
       for (const skill of selected) {
-        const value = assessed.get(skill);
-        // Omit rather than zero-fill: nulls create gaps in the line.
-        point[skill] = value ?? null;
+        const value = assessed.get(skill.toLowerCase());
+        // Omit rather than zero-fill: nulls represent unassessed rounds
+        point[skill] = value !== undefined ? value : null;
       }
       return point;
+    });
+  }, [chronological, selectedSkills]);
+
+  // Skill trend calculations: initial score, latest score, delta, session count.
+  const skillTrends = useMemo(() => {
+    return selectedSkills.slice(0, 5).map((skill) => {
+      const scores: number[] = [];
+      for (const item of chronological) {
+        const match = extractAssessedSkills(item).find(
+          (s) => s.skill.toLowerCase() === skill.toLowerCase(),
+        );
+        if (match && typeof match.score === "number") {
+          scores.push(match.score);
+        }
+      }
+      const count = scores.length;
+      const initialScore = count > 0 ? scores[0] : null;
+      const latestScore = count > 0 ? (scores[scores.length - 1] as number) : null;
+      const delta =
+        count >= 2 && typeof initialScore === "number" && typeof latestScore === "number"
+          ? latestScore - initialScore
+          : null;
+
+      return {
+        skill,
+        count,
+        initialScore,
+        latestScore,
+        delta,
+      };
     });
   }, [chronological, selectedSkills]);
 
@@ -300,7 +406,66 @@ export function History() {
               </section>
             )}
 
-            {/* Skill progression */}
+            {/* Single completed interview: baseline state */}
+            {interviews.length === 1 && allSkills.length > 0 && (
+              <section className="rounded-2xl border border-border bg-card/60 p-5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold tracking-tight">
+                      Skill Progression
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Baseline established from your first interview. Complete another interview to track your score progression and skill trends over time.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {allSkills.map((skill) => {
+                    const firstInterview = chronological[0];
+                    if (!firstInterview) return null;
+                    const assessed = extractAssessedSkills(firstInterview);
+                    const match = assessed.find(
+                      (s) => s.skill.toLowerCase() === skill.toLowerCase(),
+                    );
+                    const score = match ? match.score : null;
+                    if (score === null) return null;
+                    const tier = scoreTier(score);
+                    return (
+                      <div
+                        key={skill}
+                        className="flex items-center justify-between rounded-xl border border-border bg-card/40 p-3"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <p className="truncate text-sm font-semibold">{skill}</p>
+                          <p className="text-xs text-muted-foreground">Baseline score</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-base font-bold">{score}/100</span>
+                          <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-semibold", tier.className)}>
+                            {tier.label}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 rounded-xl border border-dashed border-primary/30 bg-primary/5 p-4 text-center text-xs text-muted-foreground">
+                  <span>Ready to see your progression curve? </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/")}
+                    className="font-semibold text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    Complete another interview
+                  </button>
+                  <span> to start tracking skill trends over time.</span>
+                </div>
+              </section>
+            )}
+
+            {/* Multiple completed interviews: full skill progression chart & trends */}
             {interviews.length >= 2 && allSkills.length > 0 && (
               <section className="rounded-2xl border border-border bg-card/60 p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -309,8 +474,7 @@ export function History() {
                       Skill Progression
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                      Only interviews where the skill was actually assessed contribute a
-                      point — gaps mean the skill was not tested, not a zero.
+                      Only interviews where the skill was actually assessed contribute a point. Trends connect consecutive and non-consecutive assessments cleanly.
                     </p>
                   </div>
                   <Button
@@ -348,27 +512,109 @@ export function History() {
                   </div>
                 )}
 
-                <div className="mt-4 h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={skillSeries} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      {selectedSkills.map((skill, i) => (
-                        <Line
-                          key={skill}
-                          type="monotone"
-                          dataKey={skill}
-                          stroke={SKILL_COLORS[i % SKILL_COLORS.length]}
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                          connectNulls={false}
+                {/* Skill trend metric summary chips */}
+                {skillTrends.length > 0 && (
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {skillTrends.map((t, idx) => {
+                      const color = SKILL_COLORS[idx % SKILL_COLORS.length];
+                      return (
+                        <div
+                          key={t.skill}
+                          className="flex items-center justify-between rounded-xl border border-border bg-card/40 p-3"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <span
+                              className="size-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: color }}
+                            />
+                            <p className="truncate text-xs font-semibold">{t.skill}</p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className="text-xs font-bold">
+                              {t.latestScore !== null ? `${t.latestScore}/100` : "—"}
+                            </span>
+                            {t.delta !== null ? (
+                              <span
+                                className={cn(
+                                  "flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                                  t.delta > 0
+                                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/30"
+                                    : t.delta < 0
+                                      ? "bg-rose-500/10 text-rose-500 border border-rose-500/30"
+                                      : "bg-muted text-muted-foreground border border-border",
+                                )}
+                              >
+                                {t.delta > 0 ? (
+                                  <TrendingUp className="size-3" />
+                                ) : t.delta < 0 ? (
+                                  <TrendingDown className="size-3" />
+                                ) : (
+                                  <Minus className="size-3" />
+                                )}
+                                {t.delta > 0 ? `+${t.delta}` : t.delta}
+                              </span>
+                            ) : (
+                              <span className="rounded bg-muted/50 border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                Baseline
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {selectedSkills.length === 0 ? (
+                  <div className="mt-6 flex h-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border text-center text-sm text-muted-foreground">
+                    <p className="font-medium">No skills selected for the chart</p>
+                    <p className="text-xs">Click a skill pill above to display its progression curve.</p>
+                  </div>
+                ) : (
+                  <div className="mt-4 h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={skillSeries} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
+                        <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                        <Tooltip
+                          formatter={(value, name) => [
+                            value !== null && value !== undefined ? `${value}/100` : "Not assessed",
+                            String(name),
+                          ]}
+                          labelFormatter={(label, payload) =>
+                            payload?.[0]?.payload?.date
+                              ? `${payload[0].payload.date} (${label})`
+                              : String(label)
+                          }
                         />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+                        {selectedSkills.map((skill, i) => (
+                          <Line
+                            key={skill}
+                            type="monotone"
+                            dataKey={(entry: any) => (entry[skill] !== undefined ? entry[skill] : null)}
+                            name={skill}
+                            stroke={SKILL_COLORS[i % SKILL_COLORS.length]}
+                            strokeWidth={2}
+                            dot={{ r: 4 }}
+                            activeDot={{ r: 6 }}
+                            connectNulls={true}
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Interviews exist but no specific skill evaluations recorded */}
+            {interviews.length > 0 && allSkills.length === 0 && (
+              <section className="rounded-2xl border border-border bg-card/60 p-5 shadow-sm text-center">
+                <h2 className="text-base font-semibold">Skill Progression</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  No individual skill scores were recorded in your past interviews. Complete an interview with targeted skills to track your skill progression.
+                </p>
               </section>
             )}
 

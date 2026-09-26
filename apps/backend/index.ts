@@ -234,7 +234,7 @@ app.get(
   async (req: AuthenticatedRequest, res) => {
     try {
       const { prisma } = await import("./db.ts");
-      const interviews = await prisma.interview.findMany({
+      const rawInterviews = await prisma.interview.findMany({
         where: { userId: req.user!.uid, status: "Done", score: { not: null } },
         orderBy: { createdAt: "desc" },
         select: {
@@ -252,6 +252,34 @@ app.get(
           completedAt: true,
           createdAt: true,
         },
+      });
+
+      const interviews = rawInterviews.map((item) => {
+        let evaluation = item.evaluation as any;
+        if (typeof evaluation === "string") {
+          try {
+            evaluation = JSON.parse(evaluation);
+          } catch {
+            evaluation = null;
+          }
+        }
+        if (evaluation && typeof evaluation === "object") {
+          const skills =
+            Array.isArray(evaluation.assessedSkills) && evaluation.assessedSkills.length > 0
+              ? evaluation.assessedSkills
+              : Array.isArray(evaluation.technicalSkills) && evaluation.technicalSkills.length > 0
+                ? evaluation.technicalSkills
+                : [];
+          evaluation = {
+            ...evaluation,
+            assessedSkills: skills,
+            technicalSkills: skills,
+          };
+        }
+        return {
+          ...item,
+          evaluation,
+        };
       });
 
       res.json({ interviews });
