@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { VoiceOrb } from "./VoiceOrb";
+import { ThemeToggle } from "@/lib/theme";
 
 type Status =
   | "requesting-microphone"
@@ -1150,14 +1151,14 @@ export function Interview() {
     <main className="flex min-h-screen flex-col bg-background">
       {/* ── Top Bar ── */}
       <header className="sticky top-0 z-20 border-b border-border bg-background/95">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-2 px-3 py-2.5 sm:px-6 sm:py-3 md:px-8">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
               <Bot className="size-4 text-primary" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary leading-none">AI Interview</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
                 {context.targetRole
                   ? `${context.targetRole}${context.targetCompany ? ` · ${context.targetCompany}` : ""}` 
                   : "Technical Assessment"}
@@ -1189,39 +1190,40 @@ export function Interview() {
           </div>
 
           {/* Connection Status + Controls */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {(diagnostics.deepgramStatus !== "connected" || status === "error") && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => { reconnectAttemptsRef.current = 0; void reconnectVoice(); }}
                 disabled={isReconnecting}
-                className="gap-1.5 text-xs border-amber-500/40 text-amber-600 hover:bg-amber-500/10"
+                className="gap-1 sm:gap-1.5 text-[11px] sm:text-xs border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 px-2 sm:px-3 h-8"
               >
                 {isReconnecting ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                {isReconnecting ? "Reconnecting…" : "Reconnect Voice"}
+                <span className="hidden xs:inline">{isReconnecting ? "Reconnecting…" : "Reconnect"}</span>
               </Button>
             )}
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${voiceState.badge}`}>
+            <span className={`hidden xs:inline-flex items-center gap-1.5 rounded-full border px-2 sm:px-2.5 py-1 text-[10px] sm:text-[11px] font-semibold ${voiceState.badge}`}>
               <span className={`size-1.5 rounded-full ${voiceState.dot}`} />
               {voiceState.label}
             </span>
+            <ThemeToggle className="size-8" />
             <Button
               variant="destructive"
               size="sm"
               onClick={endInterview}
               disabled={status === "ending"}
-              className="gap-1.5 text-xs"
+              className="gap-1 sm:gap-1.5 text-xs h-8 px-2.5 sm:px-3"
             >
               {status === "ending" ? <Loader2 className="size-3 animate-spin" /> : <PhoneOff className="size-3" />}
-              End
+              <span>End</span>
             </Button>
           </div>
         </div>
 
         {/* Pipeline status mini-bar */}
         <div className="border-t border-border/60 bg-muted/40">
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 overflow-x-auto px-5 py-1.5 sm:px-8">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 overflow-x-auto px-3 py-1.5 sm:px-6 md:px-8">
             <div className="flex shrink-0 items-center gap-5 text-[11px]">
               <span className="flex items-center gap-1.5">
                 <span className={`size-1.5 rounded-full ${
@@ -1277,9 +1279,9 @@ export function Interview() {
                 </div>
               </div>
               <div className={`mt-2 rounded-md border px-3 py-2 text-[11px] flex items-start gap-2 ${
-                assessment.tone === "healthy" ? "border-emerald-500/30 bg-emerald-50 text-emerald-700" :
-                assessment.tone === "warning" ? "border-amber-500/30 bg-amber-50 text-amber-700" :
-                "border-destructive/40 bg-red-50 text-destructive"
+                assessment.tone === "healthy" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" :
+                assessment.tone === "warning" ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" :
+                "border-destructive/40 bg-destructive/10 text-destructive"
               }`}>
                 {assessment.tone === "healthy" ? (
                   <Check className="size-3.5 mt-0.5 shrink-0 text-emerald-600" />
@@ -1296,13 +1298,13 @@ export function Interview() {
       </header>
 
       {/* ── Main Two-Panel Layout ── */}
-      <div className="mx-auto grid w-full max-w-6xl flex-1 gap-0 px-5 py-6 sm:px-8 lg:grid-cols-[1fr_380px] lg:gap-6">
+      <div className="mx-auto grid w-full max-w-6xl flex-1 gap-5 px-3 py-4 sm:px-6 sm:py-6 md:px-8 lg:grid-cols-[1fr_380px] lg:gap-6">
 
         {/* ── LEFT: Interview Console ── */}
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-4 sm:gap-5 min-w-0">
 
           {/* Voice Orbs */}
-          <div className="animate-fade-in flex items-center justify-center gap-10 rounded-2xl border border-border bg-card/60 py-6 shadow-sm">
+          <div className="animate-fade-in flex flex-row items-center justify-center gap-3 sm:gap-6 md:gap-10 rounded-2xl border border-border bg-card/60 p-4 sm:py-6 shadow-sm overflow-hidden">
             <VoiceOrb
               level={aiLevel}
               speaking={aiSpeaking}
@@ -1414,7 +1416,7 @@ export function Interview() {
             />
 
             {interimTranscript && (
-              <div className="mt-2 flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-50 px-3 py-1.5 text-[11px] text-cyan-700">
+              <div className="mt-2 flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-700 dark:text-cyan-400">
                 <span className="size-1.5 rounded-full bg-cyan-500 animate-ping" />
                 <span className="font-semibold">Live speech:</span>
                 <span className="italic truncate">{interimTranscript}</span>
@@ -1462,21 +1464,21 @@ export function Interview() {
 
           {/* Status messages */}
           {submittedAnswer && (
-            <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
-              <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-400">
+              <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
               Answer submitted — next question is being prepared.
             </div>
           )}
 
           {error && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-red-50 px-3 py-2 text-sm text-destructive">
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <span>{error}</span>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => { reconnectAttemptsRef.current = 0; void reconnectVoice(); }}
                 disabled={isReconnecting}
-                className="h-7 shrink-0 text-[11px] border-destructive/30 text-destructive hover:bg-red-50"
+                className="h-7 shrink-0 text-[11px] border-destructive/30 text-destructive hover:bg-destructive/20"
               >
                 Reconnect Voice
               </Button>
@@ -1516,7 +1518,7 @@ export function Interview() {
                   </div>
                   <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[11px] leading-relaxed ${
                     turn.role === "ai"
-                      ? "rounded-tl-sm border border-border bg-white text-foreground shadow-xs"
+                      ? "rounded-tl-sm border border-border bg-card text-foreground shadow-xs"
                       : "rounded-tr-sm bg-primary text-primary-foreground"
                   }`}>
                     <p className="mb-0.5 font-semibold opacity-60" style={{ fontSize: "10px" }}>
@@ -1534,7 +1536,7 @@ export function Interview() {
                 <div className="grid size-6 shrink-0 place-items-center rounded-full bg-indigo-500 text-white">
                   <Bot className="size-3" />
                 </div>
-                <div className="rounded-2xl rounded-tl-sm border border-border bg-white px-3 py-2.5 text-[11px] shadow-xs">
+                <div className="rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2.5 text-[11px] shadow-xs">
                   <p className="mb-1 font-semibold opacity-60" style={{ fontSize: "10px" }}>Interviewer</p>
                   <div className="flex items-center gap-1.5">
                     <span className="size-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "0ms" }} />

@@ -10,10 +10,17 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { RequireAuth, RedirectIfAuthed } from "./auth/guards";
 import { Toaster } from "sonner";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { ThemeProvider, useTheme } from "./lib/theme";
+
+function ThemedToaster() {
+  const { theme } = useTheme();
+  return <Toaster position="bottom-left" theme={theme} />;
+}
 
 export function App() {
   return (
-    <AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
       <BrowserRouter>
         <Routes>
           <Route
@@ -74,9 +81,10 @@ export function App() {
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        <Toaster position="bottom-left" />
+        <ThemedToaster />
       </BrowserRouter>
     </AuthProvider>
+    </ThemeProvider>
   );
 }
 

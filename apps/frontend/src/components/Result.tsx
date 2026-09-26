@@ -235,7 +235,7 @@ export function Result() {
     <PageShell>
       <AppHeader />
 
-      <div className="animate-fade-up mx-auto flex w-full max-w-4xl flex-col gap-8 pt-16 sm:pt-20">
+      <div className="animate-fade-up mx-auto flex w-full max-w-4xl flex-col gap-8 px-3.5 py-6 sm:px-6 sm:py-10 md:px-8">
         {/* Top Header */}
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
           <div>
@@ -243,7 +243,7 @@ export function Result() {
               <Award className="size-3.5 text-primary" />
               Verified Performance Assessment
             </div>
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
               Interview Evaluation Report
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
@@ -296,9 +296,9 @@ export function Result() {
         ) : (
           <div className="flex flex-col gap-8">
             {/* 1. OVERALL PERFORMANCE HERO CARD */}
-            <section className="animate-scale-in relative overflow-hidden rounded-2xl border border-border bg-card/70 p-6 shadow-sm sm:p-8">
+            <section className="animate-scale-in relative overflow-hidden rounded-2xl border border-border bg-card/70 p-4 sm:p-6 md:p-8 shadow-sm">
               <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-center gap-6">
+                <div className="flex flex-wrap items-center gap-4 sm:gap-6">
                   {/* Animated score ring */}
                   <div
                     className="relative grid size-28 shrink-0 place-items-center rounded-full"
@@ -326,7 +326,7 @@ export function Result() {
                 </div>
 
                 {/* Level Comparison Card */}
-                <div className="grid grid-cols-2 gap-4 rounded-xl border border-border bg-background/50 p-4 min-w-[280px]">
+                <div className="grid grid-cols-2 gap-3 sm:gap-4 rounded-xl border border-border bg-background/50 p-3.5 sm:p-4 w-full sm:w-auto sm:min-w-[240px]">
                   <div>
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                       <UserCheck className="size-3.5 text-primary" />
@@ -341,10 +341,10 @@ export function Result() {
                   </div>
                   <div className="border-l border-border pl-4">
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                      <CheckCircle2 className="size-3.5 text-emerald-400" />
+                      <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />
                       Demonstrated
                     </span>
-                    <p className="mt-1 text-sm font-semibold text-emerald-400">
+                    <p className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                       {demonstratedLevel}
                     </p>
                     <span className="text-[11px] text-muted-foreground">
@@ -412,7 +412,7 @@ export function Result() {
                       {/* Strengths */}
                       {skillItem.strengths && skillItem.strengths.length > 0 && (
                         <div className="mt-4">
-                          <span className="text-xs font-semibold text-emerald-400">
+                          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                             Demonstrated Strengths
                           </span>
                           <ul className="mt-1 space-y-1">
@@ -421,7 +421,7 @@ export function Result() {
                                 key={i}
                                 className="flex items-start gap-1.5 text-xs text-muted-foreground"
                               >
-                                <Check className="mt-0.5 size-3 shrink-0 text-emerald-400" />
+                                <Check className="mt-0.5 size-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
                                 <span>{str}</span>
                               </li>
                             ))}
@@ -432,7 +432,7 @@ export function Result() {
                       {/* Weaknesses */}
                       {skillItem.weaknesses && skillItem.weaknesses.length > 0 && (
                         <div className="mt-3">
-                          <span className="text-xs font-semibold text-amber-400">
+                          <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                             Identified Gaps
                           </span>
                           <ul className="mt-1 space-y-1">
@@ -590,7 +590,7 @@ export function Result() {
             {/* 5. OVERALL STRENGTHS & RECOMMENDED FOCUS AREAS */}
             <section className="grid gap-6 sm:grid-cols-2">
               <div className="rounded-xl border border-border bg-card/60 p-5">
-                <div className="flex items-center gap-2 text-emerald-400 mb-3">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 mb-3">
                   <CheckCircle2 className="size-4" />
                   <h2 className="text-sm font-semibold uppercase tracking-wider">
                     Core Strengths
@@ -602,7 +602,7 @@ export function Result() {
                       key={idx}
                       className="flex items-start gap-2 text-xs text-muted-foreground leading-relaxed"
                     >
-                      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-emerald-400" />
+                      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-emerald-500" />
                       <span>{item}</span>
                     </li>
                   ))}
@@ -610,7 +610,7 @@ export function Result() {
               </div>
 
               <div className="rounded-xl border border-border bg-card/60 p-5">
-                <div className="flex items-center gap-2 text-amber-400 mb-3">
+                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-3">
                   <TrendingUp className="size-4" />
                   <h2 className="text-sm font-semibold uppercase tracking-wider">
                     Recommended Focus Areas

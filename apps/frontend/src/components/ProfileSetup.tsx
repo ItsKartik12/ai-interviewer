@@ -142,14 +142,14 @@ export function ProfileSetup() {
   return (
     <PageShell>
       <AppHeader />
-      <div className="animate-fade-up mx-auto flex w-full max-w-5xl flex-col gap-8 pt-12 sm:pt-16">
+      <div className="animate-fade-up mx-auto flex w-full max-w-5xl flex-col gap-8 px-3.5 py-6 sm:px-6 sm:py-10 md:px-8">
         {/* Header */}
         <section className="max-w-2xl">
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
             <Sparkles className="size-3.5 text-primary" />
             One-time setup
           </div>
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
             Build your{" "}
             <span className="text-primary">interview profile</span>
           </h1>

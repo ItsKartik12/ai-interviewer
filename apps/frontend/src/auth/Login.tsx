@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/lib/theme";
 
 type Mode = "signin" | "signup";
 
@@ -44,8 +45,11 @@ export function Login() {
 
   if (!configured) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background px-5">
-        <div className="w-full max-w-md rounded-lg border border-border bg-card p-8 text-center shadow-sm">
+      <main className="relative flex min-h-screen items-center justify-center bg-background px-4 py-8">
+        <div className="absolute right-4 top-4">
+          <ThemeToggle />
+        </div>
+        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 sm:p-8 text-center shadow-sm">
           <div className="mx-auto mb-4 grid size-12 place-items-center rounded-lg bg-primary/10">
             <Bot className="size-6 text-primary" />
           </div>
@@ -134,8 +138,11 @@ export function Login() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-5 py-10">
-      <div className="grid w-full max-w-5xl items-center gap-12 lg:grid-cols-2">
+    <main className="relative flex min-h-screen items-center justify-center bg-background px-3.5 py-8 sm:px-6 sm:py-10">
+      <div className="absolute right-4 top-4 z-20">
+        <ThemeToggle />
+      </div>
+      <div className="grid w-full max-w-5xl items-center gap-8 lg:gap-12 lg:grid-cols-2">
         {/* Value proposition — desktop only */}
         <section className="hidden lg:block">
           <div className="mb-5 inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">

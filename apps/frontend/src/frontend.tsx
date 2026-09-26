@@ -9,8 +9,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 
-// Dark professional theme by default (light mode still available by removing this)
-document.documentElement.classList.add("dark");
+// Theme is initialized via index.html early script and managed by ThemeProvider
 
 const elem = document.getElementById("root")!;
 const app = (

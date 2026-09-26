@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
 /* ------------------------------------------------------------------ */
 export function PageShell({ children }: { children: ReactNode }) {
   return (
-    <main className="relative min-h-screen overflow-x-clip bg-background px-5 py-8 sm:px-8">
-      <div className="relative z-10">{children}</div>
+    <main className="relative min-h-screen w-full overflow-x-clip bg-background text-foreground flex flex-col">
+      <div className="relative z-10 flex min-h-screen flex-col">{children}</div>
     </main>
   );
 }
@@ -291,7 +291,7 @@ export function ResumeUploader({
           onDragEnter={() => setIsDragOver(true)}
           onDragLeave={() => setIsDragOver(false)}
           className={cn(
-            "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 p-6 text-center transition-all",
+            "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-6 text-center transition-all",
             "hover:border-primary/40 hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
             isDragOver && "border-primary bg-primary/10",
             (disabled || parsing) && "pointer-events-none opacity-50",

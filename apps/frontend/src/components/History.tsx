@@ -271,7 +271,7 @@ export function History() {
     return (
       <PageShell>
         <AppHeader />
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 pt-16">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-3.5 py-6 sm:px-6 sm:py-10 md:px-8">
           <div>
             <Skeleton className="h-4 w-28" />
             <Skeleton className="mt-3 h-9 w-72" />
@@ -307,7 +307,7 @@ export function History() {
   return (
     <PageShell>
       <AppHeader />
-      <div className="animate-fade-up mx-auto flex w-full max-w-5xl flex-col gap-8 pt-16">
+      <div className="animate-fade-up mx-auto flex w-full max-w-5xl flex-col gap-8 px-3.5 py-6 sm:px-6 sm:py-10 md:px-8">
         <SectionHeading
           eyebrow="Your Progress"
           title="Results History"
@@ -378,30 +378,42 @@ export function History() {
                 <p className="text-xs text-muted-foreground">
                   Recorded overall score per completed interview (oldest → newest).
                 </p>
-                <div className="mt-4 h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={overallData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
-                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
-                      <Tooltip
-                        formatter={(value) => [`${value}/100`, "Score"]}
-                        labelFormatter={(label, payload) =>
-                          payload?.[0]?.payload?.date
-                            ? `${payload[0].payload.date} (${label})`
-                            : String(label)
-                        }
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="score"
-                        stroke="var(--color-primary, #6366f1)"
-                        strokeWidth={2.5}
-                        dot={{ r: 4 }}
-                        connectNulls
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="mt-4 w-full overflow-x-auto">
+                  <div className="h-64 min-w-[280px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={overallData} margin={{ top: 5, right: 15, bottom: 5, left: -20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
+                        <XAxis dataKey="label" stroke="var(--border)" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+                        <YAxis domain={[0, 100]} stroke="var(--border)" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "var(--card)",
+                            borderColor: "var(--border)",
+                            color: "var(--card-foreground)",
+                            borderRadius: "8px",
+                            fontSize: "12px",
+                            boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                          }}
+                          itemStyle={{ color: "var(--card-foreground)" }}
+                          labelStyle={{ color: "var(--card-foreground)", fontWeight: 600 }}
+                          formatter={(value) => [`${value}/100`, "Score"]}
+                          labelFormatter={(label, payload) =>
+                            payload?.[0]?.payload?.date
+                              ? `${payload[0].payload.date} (${label})`
+                              : String(label)
+                          }
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="score"
+                          stroke="var(--color-primary, #6366f1)"
+                          strokeWidth={2.5}
+                          dot={{ r: 4 }}
+                          connectNulls
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               </section>
             )}
@@ -571,38 +583,50 @@ export function History() {
                     <p className="text-xs">Click a skill pill above to display its progression curve.</p>
                   </div>
                 ) : (
-                  <div className="mt-4 h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={skillSeries} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
-                        <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
-                        <Tooltip
-                          formatter={(value, name) => [
-                            value !== null && value !== undefined ? `${value}/100` : "Not assessed",
-                            String(name),
-                          ]}
-                          labelFormatter={(label, payload) =>
-                            payload?.[0]?.payload?.date
-                              ? `${payload[0].payload.date} (${label})`
-                              : String(label)
-                          }
-                        />
-                        {selectedSkills.map((skill, i) => (
-                          <Line
-                            key={skill}
-                            type="monotone"
-                            dataKey={(entry: any) => (entry[skill] !== undefined ? entry[skill] : null)}
-                            name={skill}
-                            stroke={SKILL_COLORS[i % SKILL_COLORS.length]}
-                            strokeWidth={2}
-                            dot={{ r: 4 }}
-                            activeDot={{ r: 6 }}
-                            connectNulls={true}
+                  <div className="mt-4 w-full overflow-x-auto">
+                    <div className="h-64 min-w-[280px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={skillSeries} margin={{ top: 5, right: 15, bottom: 5, left: -20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
+                          <XAxis dataKey="label" stroke="var(--border)" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+                          <YAxis domain={[0, 100]} stroke="var(--border)" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "var(--card)",
+                              borderColor: "var(--border)",
+                              color: "var(--card-foreground)",
+                              borderRadius: "8px",
+                              fontSize: "12px",
+                              boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                            }}
+                            itemStyle={{ color: "var(--card-foreground)" }}
+                            labelStyle={{ color: "var(--card-foreground)", fontWeight: 600 }}
+                            formatter={(value, name) => [
+                              value !== null && value !== undefined ? `${value}/100` : "Not assessed",
+                              String(name),
+                            ]}
+                            labelFormatter={(label, payload) =>
+                              payload?.[0]?.payload?.date
+                                ? `${payload[0].payload.date} (${label})`
+                                : String(label)
+                            }
                           />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
+                          {selectedSkills.map((skill, i) => (
+                            <Line
+                              key={skill}
+                              type="monotone"
+                              dataKey={(entry: any) => (entry[skill] !== undefined ? entry[skill] : null)}
+                              name={skill}
+                              stroke={SKILL_COLORS[i % SKILL_COLORS.length]}
+                              strokeWidth={2}
+                              dot={{ r: 4 }}
+                              activeDot={{ r: 6 }}
+                              connectNulls={true}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 )}
               </section>

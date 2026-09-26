@@ -377,7 +377,7 @@ export function Form() {
   return (
     <PageShell>
       <AppHeader />
-      <div className="animate-fade-up mx-auto flex w-full max-w-3xl flex-col gap-8 pt-16 sm:pt-20">
+      <div className="animate-fade-up mx-auto flex w-full max-w-3xl flex-col gap-8 px-3.5 py-6 sm:px-6 sm:py-10 md:px-8">
         <section className="max-w-2xl">
           {/* Progress steps */}
           <div className="mb-6 flex items-center gap-2" aria-label="Setup progress">
@@ -413,7 +413,7 @@ export function Form() {
             <Mic className="size-3.5 text-primary" />
             AI Voice Interview Platform
           </div>
-          <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
+          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl md:text-5xl">
             {step === 1 ? (
               <>
                 Configure your <span className="text-primary">mock interview</span>

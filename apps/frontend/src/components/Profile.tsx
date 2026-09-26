@@ -118,10 +118,10 @@ export function Profile() {
   return (
     <PageShell>
       <AppHeader />
-      <div className="animate-fade-up mx-auto flex w-full max-w-5xl flex-col gap-8 pt-12 sm:pt-16">
+      <div className="animate-fade-up mx-auto flex w-full max-w-5xl flex-col gap-8 px-3.5 py-6 sm:px-6 sm:py-10 md:px-8">
         <section className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
               Your Profile
             </h1>
             <p className="mt-2 max-w-xl text-sm text-muted-foreground">

@@ -4,7 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-    <title>AI Interviewer</title>
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem("theme");
+          var isDark = saved ? saved === "dark" : !window.matchMedia("(prefers-color-scheme: light)").matches;
+          if (isDark) {
+            document.documentElement.classList.add("dark");
+            document.documentElement.style.colorScheme = "dark";
+          } else {
+            document.documentElement.classList.remove("dark");
+            document.documentElement.style.colorScheme = "light";
+          }
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
     <script type="module" src="./frontend.tsx"></script>
   </head>
   <body>
